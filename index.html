@@ -12,7 +12,8 @@
   <meta property="og:description" content="Tecnologia, gestão e novas possibilidades. Nosso site está em construção.">
   <meta property="og:url" content="https://auvriun.com/">
   <title>AUVRIUN | Em construção</title>
-  <link rel="icon" type="image/png" href="minimalista%20fudo%20escuro.png">
+  <link rel="icon" type="image/png" sizes="210x134" href="minimalista%20fudo%20escuro.png">
+  <link rel="apple-touch-icon" href="minimalista%20fudo%20escuro.png">
   <style>
     :root {
       color-scheme: dark;
@@ -100,7 +101,6 @@
     }
     .main {
       flex:1;
-      width:100%;
       display:grid;
       grid-template-columns:minmax(0, 1.08fr) minmax(0,.92fr);
       align-items:center;
@@ -108,7 +108,7 @@
       padding-top:48px;
       padding-bottom:65px;
     }
-    .copy { position:relative; z-index:2; max-width:680px; }
+    .copy { position:relative; z-index:2; max-width:680px; min-width:0; }
     .eyebrow {
       display:inline-flex; align-items:center; gap:13px;
       color:#8ebaff; font-size:12px; font-weight:750;
@@ -122,7 +122,7 @@
     }
     h1 {
       margin:0;
-      font-size:clamp(3.3rem,5.65vw,6.5rem);
+      font-size:clamp(3.15rem,4.95vw,5.15rem);
       line-height:1.035;
       font-weight:750;
       letter-spacing:-.067em;
@@ -254,8 +254,8 @@
     @keyframes spin { to { transform:rotate(360deg); } }
     @media (max-width: 1080px) {
       .wrap { width:min(100% - 80px,1300px); }
-      .main { gap:26px; }
-      h1 {font-size:clamp(3.15rem,6.1vw,5.5rem);}
+      .main { gap:36px; }
+      h1 {font-size:clamp(3.05rem,5.6vw,4.8rem);}
       .visual {height:440px;min-height:330px;}
     }
     @media (max-width: 760px) {
