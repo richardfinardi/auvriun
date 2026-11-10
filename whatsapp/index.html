@@ -64,7 +64,7 @@ th,td{padding:11px 12px;text-align:left;border-bottom:1px solid #263b5a}th{backg
 <div class="hr"></div><div class="row" style="justify-content:space-between"><h2>Eventos autorizados</h2><button class="secondary" id="addEvent">+ Evento</button></div>
 <p class="small">Cada aplicação informa um evento (ex.: <b>inspecao_reprovada</b>). O texto livre só é entregue dentro da janela de atendimento de 24h; para alertas iniciados pela empresa, use template aprovado.</p>
 <div class="entries" id="events"></div>
-<div class="actions"><button id="save">Salvar aplicação</button><button id="rotate" class="secondary">Gerar / trocar chave da aplicação</button><button id="test" class="secondary">Teste: 1 destinatário</button></div>
+<div class="actions"><button id="save">Salvar aplicação</button><button id="rotate" class="secondary">Gerar / trocar chave da aplicação</button><button id="test" class="secondary">Teste: todos os ativos</button></div>
 <div class="hide" id="keyBox"><label>Chave gerada (copie agora; não será exibida novamente)</label><pre id="newKey"></pre><button id="copyKey" class="secondary">Copiar chave</button></div>
 <p class="small">A chave da aplicação vai no Secret do Worker que solicita envios. Não coloque chaves em HTML, Apps Script público ou GitHub.</p>
 </div>
@@ -147,11 +147,11 @@ $("rotate").onclick=async()=>{try{const id=$("appId").value.trim();if(!apps.some
 $("copyKey").onclick=async()=>{try{await navigator.clipboard.writeText($("newKey").textContent);notice("Chave copiada. Configure no Secret do Worker solicitante.");}catch(e){notice("Não foi possível copiar automaticamente.",true);}};
 $("test").onclick=async()=>{try{const id=$("appId").value.trim(),a=apps.find(x=>x.id===id);
   if(!a)throw Error("Salve a aplicação primeiro");
-  const target=a.recipients.find(r=>r.active),event=a.events.find(e=>e.active);
-  if(!target||!event)throw Error("Cadastre um destinatário ativo e um evento ativo");
-  if(!confirm("Enviar um TESTE de "+event.id+" ao WhatsApp terminado em "+target.phone.slice(-4)+"?"))return;
+  const recipients=a.recipients.filter(r=>r.active),event=a.events.find(e=>e.active);
+  if(!recipients.length||!event)throw Error("Cadastre destinatários ativos e um evento ativo");
+  if(!confirm("Enviar um TESTE de "+event.id+" para TODOS os "+recipients.length+" destinatário(s) ativos?"))return;
   const data=await call("/admin/apps/"+id+"/test",{method:"POST",body:JSON.stringify({
-    event:event.id,only:[target.phone],message:(a.brand==="CONSULTORIARF"?"CONSULTORIA RF":"AUVRIUN")+" | Teste de envio WhatsApp ("+id+")"})});
+    event:event.id,message:(a.brand==="CONSULTORIARF"?"CONSULTORIA RF":"AUVRIUN")+" | Teste de envio WhatsApp ("+id+")"})});
   notice("Teste: "+data.accepted+"/"+data.requested+" aceite(s) pela Omni. Aceite não significa entrega.");}
   catch(e){notice(e.message,true);}};
 $("refresh").onclick=async()=>{try{await reload();notice("Lista atualizada.");}catch(e){notice(e.message,true);}};
