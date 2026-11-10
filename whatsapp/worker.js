@@ -48,6 +48,7 @@ function validateApp(id,input,previous) {
   if(!input||typeof input!=="object"||Array.isArray(input))throw new Error("Aplicação inválida");
   const name=limitText(input.name,80);
   if(name.length<2)throw new Error("Informe o nome da aplicação");
+  const brand= input.brand==="CONSULTORIARF" ? "CONSULTORIARF" : "AUVRIUN";
   const recipients=Array.isArray(input.recipients)?input.recipients:[];
   if(recipients.length>30)throw new Error("Máximo de 30 destinatários por aplicação");
   const seen=new Set();
@@ -76,7 +77,7 @@ function validateApp(id,input,previous) {
     }
     return {id:event,mode,text:limitText(e?.text,4000),content,active:e.active!==false};
   });
-  return {id,name,active:input.active!==false,recipients:normalized,events:normalizedEvents,
+  return {id,name,brand,active:input.active!==false,recipients:normalized,events:normalizedEvents,
     keyHash:previous?.keyHash||null,createdAt:previous?.createdAt||new Date().toISOString(),
     updatedAt:new Date().toISOString()};
 }
@@ -148,13 +149,16 @@ async function dispatch(env,app,payload) {
   }
   if(!selected.length)throw new Error("Nenhum destinatário ativo");
   if(selected.length>30)throw new Error("Destinatários acima do limite");
-  const vars=payload.variables&&typeof payload.variables==="object"&&!Array.isArray(payload.variables)?payload.variables:{};
+  const custom=payload.variables&&typeof payload.variables==="object"&&!Array.isArray(payload.variables)?payload.variables:{};
+  // A marca pertence à aplicação e não pode ser alterada por quem chama a API.
+  const brand=app.brand==="CONSULTORIARF" ? "CONSULTORIA RF" : "AUVRIUN";
+  const vars={...custom,marca:brand};
   if(Object.keys(vars).length>40||JSON.stringify(vars).length>5000)throw new Error("Variáveis acima do limite");
   let content;
   if(event.mode==="TEMPLATE")content=interpolate(event.content,vars);
   else {
     // Mensagem específica do evento é permitida apenas para aplicações autenticadas.
-    const text=limitText(payload.message||interpolate(event.text,vars),4000);
+    const text=limitText(interpolate(payload.message||event.text,vars),4000);
     if(!text)throw new Error("Informe message ou texto padrão do evento");
     content={type:"TEXT",body:{message:text}};
   }
