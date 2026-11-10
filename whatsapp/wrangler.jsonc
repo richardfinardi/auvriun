@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "auvriun-whatsapp",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-10",
+  "workers_dev": true,
+  "kv_namespaces": [
+    { "binding": "AUVRIUN_KV" }
+  ]
+}
