@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#080e1d">
+<title>AUVRIUN | Central WhatsApp</title>
+<link rel="icon" type="image/png" href="../minimalista%20fudo%20escuro.png">
+<style>
+:root{font-family:Inter,"Segoe UI",Arial,sans-serif;color:#edf4ff;background:#080e1d;--panel:#111c31;--line:#273855;--muted:#98a9c5;--blue:#388dff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 90% 0,#102d5a 0,transparent 45%),#080e1d;min-height:100vh}
+header{max-width:1280px;margin:auto;padding:22px 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);gap:15px}
+header img{width:152px}h1{font-size:clamp(22px,3.5vw,32px);letter-spacing:-.04em;margin:10px 0}h2{font-size:19px;margin:0 0 14px}
+p{color:var(--muted);line-height:1.45}main{max-width:1280px;margin:auto;padding:26px 24px 70px}
+.eyebrow{color:#65aaff;font-weight:750;letter-spacing:.14em;font-size:11px;text-transform:uppercase}
+.card{background:linear-gradient(145deg,rgba(24,42,75,.96),rgba(11,22,40,.97));border:1px solid var(--line);border-radius:16px;padding:20px;margin-bottom:15px}
+.grid{display:grid;grid-template-columns:340px minmax(0,1fr);gap:18px;align-items:start}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wide{grid-column:1/-1}
+label{display:block;font-size:12px;color:#c6d5ed;font-weight:700;margin:10px 0 6px}
+input,textarea,select{font:inherit;color:#f6faff;background:#0a1529;border:1px solid #365078;border-radius:10px;outline:none;padding:11px 12px;width:100%;min-width:0}
+input:focus,textarea:focus,select:focus{border-color:#5ba3ff;box-shadow:0 0 0 3px #388dff22}
+textarea{resize:vertical;min-height:73px}input[type=checkbox]{width:auto;accent-color:#368cff}
+button{font:inherit;font-size:13px;font-weight:700;cursor:pointer;background:#388dff;color:#fff;border:1px solid transparent;border-radius:10px;padding:10px 14px}
+button:hover{filter:brightness(1.12)}button.secondary{background:#182d4b;border-color:#37547d}button.danger{color:#f3a6af;background:transparent;border-color:#6d3a4a}
+button:disabled{opacity:.4;cursor:not-allowed}.muted{color:var(--muted)}.small{font-size:12px}.hide{display:none!important}
+#connect{display:grid;grid-template-columns:minmax(220px,1fr) minmax(220px,1fr) auto;align-items:end;gap:14px}
+#connect label{margin-top:0}.app{display:block;text-align:left;width:100%;background:#0b1930;border:1px solid var(--line);padding:13px;margin:7px 0}
+.app strong{display:block;font-size:15px}.app span{display:block;color:var(--muted);margin-top:5px;font-size:12px}.app.selected{border-color:#4897ff;background:#14335d}
+.entries{display:grid;gap:9px;margin:12px 0}.entry{border:1px solid var(--line);background:#0a162b;border-radius:12px;padding:12px}
+.entry-head{display:grid;grid-template-columns:1fr 1.2fr auto auto;gap:8px;align-items:center}
+.event-head{grid-template-columns:minmax(120px,.9fr) 145px auto auto}
+.entry label{margin:0}.event-details{display:grid;gap:8px;margin-top:8px}.pill{font-size:12px;color:#87e0b4;background:#13382c;border:1px solid #1c6649;padding:6px 10px;border-radius:40px}
+.notice{margin:15px 0;padding:12px 14px;border-radius:10px;background:#142c4a;border:1px solid #32577a;color:#d7eaff;white-space:pre-wrap}
+.notice.error{background:#3b2029;border-color:#824251;color:#ffd7df}
+#newKey{word-break:break-all;white-space:pre-wrap;color:#87f0b5;font-size:12px;background:#061020;padding:12px;border-radius:10px}
+.tablewrap{overflow:auto;border-radius:10px;border:1px solid var(--line)}table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}
+th,td{padding:11px 12px;text-align:left;border-bottom:1px solid #263b5a}th{background:#112d4a;color:#b7d3ff}tr:last-child td{border:0}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.hr{height:1px;background:var(--line);margin:20px 0}
+@media(max-width:900px){.grid{grid-template-columns:1fr}#connect{grid-template-columns:1fr 1fr}#connect button{grid-column:1/-1}.formgrid{grid-template-columns:1fr}}
+@media(max-width:570px){main{padding:18px 12px 60px}header{padding:16px 14px}header img{width:115px}.card{padding:14px}#connect{grid-template-columns:1fr}.entry-head,.event-head{grid-template-columns:1fr 1fr}.entry-head input:first-child,.event-head input:first-child{grid-column:1/-1}button{padding:10px 12px}}
+</style></head><body>
+<header><a href="../" aria-label="AUVRIUN"><img alt="AUVRIUN" src="../APLICACAO%20FUNDO%20ESCURO.png"></a><span class="eyebrow">Messaging Hub / Administração</span></header>
+<main><div class="eyebrow">AUVRIUN Enterprise Solutions</div><h1>Central WhatsApp</h1>
+<p>Um canal de envio, múltiplas aplicações. Configurações e destinatários por cliente, sem repetir a integração com a Omni.</p>
+<section class="card" id="login"><h2>Conectar ao serviço</h2>
+<div id="connect"><div><label for="base">Endereço da API</label><input id="base" autocomplete="url" value="https://api.auvriun.com/whatsapp"></div>
+<div><label for="secret">Chave administrativa Cloudflare</label><input id="secret" type="password" autocomplete="off" placeholder="AUVRIUN_ADMIN_KEY"></div>
+<button id="doConnect">Conectar</button></div>
+<p class="small">A chave fica somente na memória desta aba. Não é gravada no navegador.</p></section>
+<div id="notice" class="notice hide" role="status"></div>
+<section class="grid hide" id="system"><aside>
+<div class="card"><div class="row" style="justify-content:space-between"><h2>Aplicações</h2><button id="addApp" class="secondary">+ Nova</button></div>
+<div id="apps"></div><p class="small" id="configState"></p></div>
+<div class="card"><h2>Operação</h2><div id="stats" class="muted small">Carregando...</div>
+<div class="actions"><button class="secondary" id="refresh">Atualizar</button><button class="secondary" id="historyButton">Histórico</button></div></div>
+</aside><div>
+<div class="card hide" id="editor">
+<div class="row" style="justify-content:space-between"><h2>Configuração da aplicação</h2><span class="pill" id="keyState">Sem chave</span></div>
+<div class="formgrid">
+<div><label for="appId">Código (não muda após cadastro)</label><input id="appId" spellcheck="false" placeholder="anfeer"></div>
+<div><label for="appName">Nome da aplicação</label><input id="appName" placeholder="ANFEER"></div>
+<div class="wide"><label><input type="checkbox" id="appActive" checked> Aplicação ativa</label></div>
+</div><div class="hr"></div>
+<div class="row" style="justify-content:space-between"><h2>Destinatários</h2><button class="secondary" id="addRecipient">+ Destinatário</button></div>
+<p class="small">Somente números cadastrados e ativos podem receber mensagens. Informe DDI + DDD + número.</p><div class="entries" id="recipients"></div>
+<div class="hr"></div><div class="row" style="justify-content:space-between"><h2>Eventos autorizados</h2><button class="secondary" id="addEvent">+ Evento</button></div>
+<p class="small">Cada aplicação informa um evento (ex.: <b>inspecao_reprovada</b>). O texto livre só é entregue dentro da janela de atendimento de 24h; para alertas iniciados pela empresa, use template aprovado.</p>
+<div class="entries" id="events"></div>
+<div class="actions"><button id="save">Salvar aplicação</button><button id="rotate" class="secondary">Gerar / trocar chave da aplicação</button><button id="test" class="secondary">Teste: 1 destinatário</button></div>
+<div class="hide" id="keyBox"><label>Chave gerada (copie agora; não será exibida novamente)</label><pre id="newKey"></pre><button id="copyKey" class="secondary">Copiar chave</button></div>
+<p class="small">A chave da aplicação vai no Secret do Worker que solicita envios. Não coloque chaves em HTML, Apps Script público ou GitHub.</p>
+</div>
+<div class="card hide" id="historyCard"><div class="row" style="justify-content:space-between"><h2>Histórico de envios</h2><button class="secondary" id="closeHistory">Fechar</button></div>
+<p class="small">ACEITO significa aceito pelo provedor, não entregue. O status muda quando o webhook de entrega está configurado.</p>
+<div class="tablewrap"><table><thead><tr><th>Data</th><th>Aplicação</th><th>Evento</th><th>Destino</th><th>Situação</th><th>ID Omni</th></tr></thead><tbody id="historyRows"></tbody></table></div></div>
+</div></section></main>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const escape=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let base="",admin="",apps=[],current=null;
+function notice(message,error=false){const x=$("notice");x.textContent=message;x.classList.remove("hide");x.classList.toggle("error",error);}
+function hideNotice(){$("notice").classList.add("hide");}
+async function call(path,opts={}){
+  const headers={"x-auvriun-admin-key":admin,...(opts.body?{"content-type":"application/json"}:{})};
+  const r=await fetch(base+path,{...opts,headers,cache:"no-store"});
+  let data;try{data=await r.json();}catch{throw Error("API retornou conteúdo inválido (HTTP "+r.status+")");}
+  if(!r.ok||data.ok===false)throw Error(data.error||"HTTP "+r.status);
+  return data;
+}
+function validateBase(){const u=new URL($("base").value.trim());if(u.protocol!=="https:")throw Error("Use HTTPS");return u.toString().replace(/\/$/,"");}
+$("doConnect").onclick=async()=>{
+  try{base=validateBase();admin=$("secret").value.trim();if(admin.length<32)throw Error("Informe a chave administrativa (mínimo 32 caracteres)");
+    await reload();$("login").classList.add("hide");$("system").classList.remove("hide");$("secret").value="";hideNotice();
+  }catch(e){notice(e.message,true);}
+};
+async function reload(){const [a,h]=await Promise.all([call("/admin/apps"),fetch(base+"/health").then(r=>r.json())]);apps=a.apps||[];renderApps();
+  $("stats").textContent="API: "+(h.ok?"online":"indisponível")+" | Omni: "+(h.providerConfigured?"configurada":"pendente")+" | KV: "+(h.kv?"conectado":"pendente");
+  $("configState").textContent=apps.length+" aplicação(ões) cadastrada(s)";}
+function renderApps(){
+  $("apps").innerHTML=apps.length?apps.map(a=>'<button class="app '+(a.id===current?"selected":"")+'" data-app="'+escape(a.id)+'"><strong>'+escape(a.name)+'</strong><span>'+escape(a.id)+' • '+(a.active?"Ativa":"Desativada")+' • '+a.recipients.filter(r=>r.active).length+' destinos</span></button>').join(""):'<p class="small">Nenhuma aplicação. Cadastre a primeira.</p>';
+  $("apps").querySelectorAll("[data-app]").forEach(el=>el.onclick=()=>edit(apps.find(a=>a.id===el.dataset.app)));
+}
+function recipientRow(r={name:"",phone:"",active:true}){
+  const item=document.createElement("div");item.className="entry recipient";
+  item.innerHTML='<div class="entry-head"><input aria-label="Nome" class="rname" placeholder="Nome" value="'+escape(r.name)+'"><input aria-label="WhatsApp" class="rphone" placeholder="5511999999999" value="'+escape(r.phone)+'"><label><input type="checkbox" class="ractive" '+(r.active!==false?"checked":"")+'> Ativo</label><button class="danger delete" type="button">Excluir</button></div>';
+  item.querySelector(".delete").onclick=()=>item.remove();$("recipients").append(item);
+}
+function eventRow(e={id:"",mode:"TEXT",text:"",content:null,active:true}){
+  const item=document.createElement("div");item.className="entry event";
+  item.innerHTML='<div class="entry-head event-head"><input class="eid" aria-label="Evento" placeholder="inspecao_reprovada" value="'+escape(e.id)+'"><select class="emode" aria-label="Tipo de envio"><option value="TEXT">Texto</option><option value="TEMPLATE">Template oficial</option></select><label><input class="eactive" type="checkbox" '+(e.active!==false?"checked":"")+'> Ativo</label><button class="danger delete" type="button">Excluir</button></div><div class="event-details"><div class="textGroup"><label>Texto padrão (opcional se a aplicação fornecer a mensagem)</label><textarea class="etext" placeholder="Ex.: Alerta de inspeção reprovada">{{text}}</textarea></div><div class="templateGroup hide"><label>JSON do conteúdo TEMPLATE (formato aceito pela Omni, template já aprovado)</label><textarea class="econtent" rows="5" spellcheck="false" placeholder="{&quot;type&quot;:&quot;TEMPLATE&quot;,&quot;body&quot;:{...}}"></textarea><p class="small">Variáveis no JSON: {{nome}}, {{peca}}. A estrutura segue a documentação da Omni.</p></div></div>'.replace("{{text}}",escape(e.text||""));
+  const sel=item.querySelector(".emode");sel.value=e.mode||"TEXT";
+  item.querySelector(".econtent").value=e.content?JSON.stringify(e.content,null,2):"";
+  const change=()=>{item.querySelector(".templateGroup").classList.toggle("hide",sel.value!=="TEMPLATE");item.querySelector(".textGroup").classList.toggle("hide",sel.value==="TEMPLATE");};
+  sel.onchange=change;change();
+  item.querySelector(".delete").onclick=()=>item.remove();$("events").append(item);
+}
+function edit(a){
+  current=a?.id||null;$("editor").classList.remove("hide");$("appId").value=a?.id||"";$("appId").disabled=!!a;
+  $("appName").value=a?.name||"";$("appActive").checked=a?.active!==false;$("recipients").innerHTML="";$("events").innerHTML="";
+  (a?.recipients||[]).forEach(recipientRow);(a?.events||[]).forEach(eventRow);
+  if(!a){recipientRow();eventRow();}$("keyBox").classList.add("hide");
+  $("keyState").textContent=a?.hasKey?"Chave ativa":"Sem chave";renderApps();hideNotice();
+}
+function collect(){
+  const id=$("appId").value.trim().toLowerCase(),name=$("appName").value.trim();
+  const recipients=[...document.querySelectorAll(".recipient")].map(x=>({name:x.querySelector(".rname").value.trim(),
+    phone:x.querySelector(".rphone").value.trim(),active:x.querySelector(".ractive").checked}));
+  const events=[...document.querySelectorAll(".event")].map(x=>{
+    const mode=x.querySelector(".emode").value;let content=null;
+    if(mode==="TEMPLATE"){try{content=JSON.parse(x.querySelector(".econtent").value);}catch{throw Error("JSON do template inválido: "+x.querySelector(".eid").value);}}
+    return {id:x.querySelector(".eid").value.trim(),mode,text:x.querySelector(".etext").value.trim(),
+      content,active:x.querySelector(".eactive").checked};
+  });
+  if(!/^[a-z][a-z0-9_-]{1,39}$/.test(id))throw Error("Código inválido. Use minúsculas e hífen, com pelo menos 2 caracteres");
+  return {id,name,active:$("appActive").checked,recipients,events};
+}
+$("addApp").onclick=()=>edit(null);$("addRecipient").onclick=()=>recipientRow();
+$("addEvent").onclick=()=>eventRow();
+$("save").onclick=async()=>{try{const app=collect();await call("/admin/apps/"+app.id,{method:"PUT",body:JSON.stringify(app)});
+    current=app.id;await reload();edit(apps.find(a=>a.id===app.id));notice("Aplicação salva. Gere uma chave para autorizar os envios.");}
+  catch(e){notice(e.message,true);}};
+$("rotate").onclick=async()=>{try{const id=$("appId").value.trim();if(!apps.some(a=>a.id===id))throw Error("Salve a aplicação antes de gerar uma chave.");
+  if(!confirm("Gerar uma nova chave invalida a anterior imediatamente. Continuar?"))return;
+  const data=await call("/admin/apps/"+id+"/key",{method:"POST"});
+  $("newKey").textContent=data.key;$("keyBox").classList.remove("hide");await reload();
+  $("keyState").textContent="Chave ativa";notice("Chave criada. Copie e coloque como Secret no Worker da aplicação.");}
+  catch(e){notice(e.message,true);}};
+$("copyKey").onclick=async()=>{try{await navigator.clipboard.writeText($("newKey").textContent);notice("Chave copiada. Configure no Secret do Worker solicitante.");}catch(e){notice("Não foi possível copiar automaticamente.",true);}};
+$("test").onclick=async()=>{try{const id=$("appId").value.trim(),a=apps.find(x=>x.id===id);
+  if(!a)throw Error("Salve a aplicação primeiro");
+  const target=a.recipients.find(r=>r.active),event=a.events.find(e=>e.active);
+  if(!target||!event)throw Error("Cadastre um destinatário ativo e um evento ativo");
+  if(!confirm("Enviar um TESTE de "+event.id+" ao WhatsApp terminado em "+target.phone.slice(-4)+"?"))return;
+  const data=await call("/admin/apps/"+id+"/test",{method:"POST",body:JSON.stringify({
+    event:event.id,only:[target.phone],message:"AUVRIUN | Teste de envio WhatsApp ("+id+")"})});
+  notice("Teste: "+data.accepted+"/"+data.requested+" aceite(s) pela Omni. Aceite não significa entrega.");}
+  catch(e){notice(e.message,true);}};
+$("refresh").onclick=async()=>{try{await reload();notice("Lista atualizada.");}catch(e){notice(e.message,true);}};
+$("historyButton").onclick=async()=>{try{const d=await call("/admin/history");
+  $("historyCard").classList.remove("hide");$("historyRows").innerHTML=(d.history||[]).map(r=>
+    "<tr><td>"+escape(new Date(r.createdAt).toLocaleString("pt-BR"))+"</td><td>"+escape(r.app)+"</td><td>"+escape(r.event)+"</td><td>"+escape(r.recipient)+" (••"+escape(r.phoneFinal)+")</td><td>"+escape(r.status)+"</td><td>"+escape(r.messageId||"—")+"</td></tr>"
+  ).join("")||'<tr><td colspan="6">Nenhum envio registrado.</td></tr>';$("historyCard").scrollIntoView({behavior:"smooth"});}
+  catch(e){notice(e.message,true);}};
+$("closeHistory").onclick=()=>$("historyCard").classList.add("hide");
+</script></body></html>
