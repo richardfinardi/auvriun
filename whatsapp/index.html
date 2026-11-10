@@ -56,6 +56,7 @@ th,td{padding:11px 12px;text-align:left;border-bottom:1px solid #263b5a}th{backg
 <div class="formgrid">
 <div><label for="appId">Código (não muda após cadastro)</label><input id="appId" spellcheck="false" placeholder="anfeer"></div>
 <div><label for="appName">Nome da aplicação</label><input id="appName" placeholder="ANFEER"></div>
+<div class="wide"><label for="appBrand">Identificação no texto da mensagem</label><select id="appBrand"><option value="AUVRIUN">AUVRIUN</option><option value="CONSULTORIARF">CONSULTORIA RF</option></select><p class="small">Usada no texto dos testes e nas mensagens que tenham o marcador <code>{{marca}}</code>. Isso não altera o nome do número remetente no WhatsApp.</p></div>
 <div class="wide"><label><input type="checkbox" id="appActive" checked> Aplicação ativa</label></div>
 </div><div class="hr"></div>
 <div class="row" style="justify-content:space-between"><h2>Destinatários</h2><button class="secondary" id="addRecipient">+ Destinatário</button></div>
@@ -114,7 +115,7 @@ function eventRow(e={id:"",mode:"TEXT",text:"",content:null,active:true}){
 }
 function edit(a){
   current=a?.id||null;$("editor").classList.remove("hide");$("appId").value=a?.id||"";$("appId").disabled=!!a;
-  $("appName").value=a?.name||"";$("appActive").checked=a?.active!==false;$("recipients").innerHTML="";$("events").innerHTML="";
+  $("appName").value=a?.name||"";$("appBrand").value=a?.brand||"AUVRIUN";$("appActive").checked=a?.active!==false;$("recipients").innerHTML="";$("events").innerHTML="";
   (a?.recipients||[]).forEach(recipientRow);(a?.events||[]).forEach(eventRow);
   if(!a){recipientRow();eventRow();}$("keyBox").classList.add("hide");
   $("keyState").textContent=a?.hasKey?"Chave ativa":"Sem chave";renderApps();hideNotice();
@@ -130,7 +131,7 @@ function collect(){
       content,active:x.querySelector(".eactive").checked};
   });
   if(!/^[a-z][a-z0-9_-]{1,39}$/.test(id))throw Error("Código inválido. Use minúsculas e hífen, com pelo menos 2 caracteres");
-  return {id,name,active:$("appActive").checked,recipients,events};
+  return {id,name,brand:$("appBrand").value,active:$("appActive").checked,recipients,events};
 }
 $("addApp").onclick=()=>edit(null);$("addRecipient").onclick=()=>recipientRow();
 $("addEvent").onclick=()=>eventRow();
@@ -150,7 +151,7 @@ $("test").onclick=async()=>{try{const id=$("appId").value.trim(),a=apps.find(x=>
   if(!target||!event)throw Error("Cadastre um destinatário ativo e um evento ativo");
   if(!confirm("Enviar um TESTE de "+event.id+" ao WhatsApp terminado em "+target.phone.slice(-4)+"?"))return;
   const data=await call("/admin/apps/"+id+"/test",{method:"POST",body:JSON.stringify({
-    event:event.id,only:[target.phone],message:"AUVRIUN | Teste de envio WhatsApp ("+id+")"})});
+    event:event.id,only:[target.phone],message:(a.brand==="CONSULTORIARF"?"CONSULTORIA RF":"AUVRIUN")+" | Teste de envio WhatsApp ("+id+")"})});
   notice("Teste: "+data.accepted+"/"+data.requested+" aceite(s) pela Omni. Aceite não significa entrega.");}
   catch(e){notice(e.message,true);}};
 $("refresh").onclick=async()=>{try{await reload();notice("Lista atualizada.");}catch(e){notice(e.message,true);}};
