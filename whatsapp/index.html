@@ -33,17 +33,24 @@ button:disabled{opacity:.4;cursor:not-allowed}.muted{color:var(--muted)}.small{f
 .tablewrap{overflow:auto;border-radius:10px;border:1px solid var(--line)}table{border-collapse:collapse;width:100%;font-size:12px;white-space:nowrap}
 th,td{padding:11px 12px;text-align:left;border-bottom:1px solid #263b5a}th{background:#112d4a;color:#b7d3ff}tr:last-child td{border:0}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}.hr{height:1px;background:var(--line);margin:20px 0}
+details{border:1px solid var(--line);padding:13px;border-radius:12px;margin:12px 0;background:#0a162b}
+summary{cursor:pointer;font-weight:650;color:#b7d7ff}
+.sendRecipients{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0}
+.sendRecipients label{padding:9px 12px;border:1px solid var(--line);border-radius:9px;display:flex;align-items:center;gap:8px;background:#09162b;margin:0}
+.sendRecipients input{margin:0}
+#integrationExample{font:12px/1.6 Consolas,"Courier New",monospace;min-height:220px}
+#apiEndpoint{font-size:12px}
 @media(max-width:900px){.grid{grid-template-columns:1fr}#connect{grid-template-columns:1fr 1fr}#connect button{grid-column:1/-1}.formgrid{grid-template-columns:1fr}}
 @media(max-width:570px){main{padding:18px 12px 60px}header{padding:16px 14px}header img{width:115px}.card{padding:14px}#connect{grid-template-columns:1fr}.entry-head,.event-head{grid-template-columns:1fr 1fr}.entry-head input:first-child,.event-head input:first-child{grid-column:1/-1}button{padding:10px 12px}}
 </style></head><body>
 <header><a href="../" aria-label="AUVRIUN"><img alt="AUVRIUN" src="../APLICACAO%20FUNDO%20ESCURO.png"></a><span class="eyebrow">Messaging Hub / Administração</span></header>
 <main><div class="eyebrow">AUVRIUN Enterprise Solutions</div><h1>Central WhatsApp</h1>
-<p>Um canal de envio, múltiplas aplicações. Configurações e destinatários por cliente, sem repetir a integração com a Omni.</p>
+<p>Cadastre clientes, destinatários, modelos e envios diretamente aqui. Uma central para todas as suas aplicações, com W-API ou Omni.</p>
 <section class="card" id="login"><h2>Conectar ao serviço</h2>
-<div id="connect"><div><label for="base">Endereço da API</label><input id="base" autocomplete="url" value="https://api.auvriun.com/whatsapp"></div>
+<div id="connect"><div><label for="base">Endereço da API</label><input id="base" autocomplete="url" value="https://auvriun-whatsapp.auvriun-monitor.workers.dev/whatsapp"></div>
 <div><label for="secret">Chave administrativa Cloudflare</label><input id="secret" type="password" autocomplete="off" placeholder="AUVRIUN_ADMIN_KEY"></div>
 <button id="doConnect">Conectar</button></div>
-<p class="small">A chave fica somente na memória desta aba. Não é gravada no navegador.</p></section>
+<p class="small">Conexão administrativa protegida. A chave fica somente em memória nesta aba.</p></section>
 <div id="notice" class="notice hide" role="status"></div>
 <section class="grid hide" id="system"><aside>
 <div class="card"><div class="row" style="justify-content:space-between"><h2>Aplicações</h2><button id="addApp" class="secondary">+ Nova</button></div>
@@ -56,22 +63,52 @@ th,td{padding:11px 12px;text-align:left;border-bottom:1px solid #263b5a}th{backg
 <div class="formgrid">
 <div><label for="appId">Código (não muda após cadastro)</label><input id="appId" spellcheck="false" placeholder="anfeer"></div>
 <div><label for="appName">Nome da aplicação</label><input id="appName" placeholder="ANFEER"></div>
-<div class="wide"><label for="appProvider">Provedor de envio</label><select id="appProvider"><option value="OMNI">Z-API Omni (oficial)</option><option value="WAPI">W-API (número dedicado)</option></select><p class="small">A opção vale para os eventos desta aplicação. Selecione W-API somente após configurar os Secrets no Cloudflare.</p></div>
+<div class="wide"><label for="appProvider">Provedor de envio</label><select id="appProvider"><option value="OMNI">Z-API Omni (oficial)</option><option value="WAPI">W-API (número dedicado)</option></select><p class="small">A configuração da W-API pode ser compartilhada entre aplicações ou definida abaixo, sem abrir o Cloudflare.</p></div>
 <div class="wide"><label for="appBrand">Identificação no texto da mensagem</label><select id="appBrand"><option value="AUVRIUN">AUVRIUN</option><option value="CONSULTORIARF">CONSULTORIA RF</option></select><p class="small">Usada no texto dos testes e nas mensagens que tenham o marcador <code>{{marca}}</code>. Isso não altera o nome do número remetente no WhatsApp.</p></div>
 <div class="wide"><label><input type="checkbox" id="appActive" checked> Aplicação ativa</label></div>
 </div><div class="hr"></div>
 <div class="row" style="justify-content:space-between"><h2>Destinatários</h2><button class="secondary" id="addRecipient">+ Destinatário</button></div>
 <p class="small">Somente números cadastrados e ativos podem receber mensagens. Informe DDI + DDD + número.</p><div class="entries" id="recipients"></div>
 <div class="hr"></div><div class="row" style="justify-content:space-between"><h2>Eventos autorizados</h2><button class="secondary" id="addEvent">+ Evento</button></div>
-<p class="small">Cada aplicação informa um evento (ex.: <b>inspecao_reprovada</b>). O texto livre só é entregue dentro da janela de atendimento de 24h; para alertas iniciados pela empresa, use template aprovado.</p>
+<p class="small">Eventos são gatilhos como <b>inspecao_reprovada</b> ou <b>os_concluida</b>. Para W-API, utilize Texto; no WhatsApp oficial, mensagens fora da janela exigem modelo aprovado.</p>
 <div class="entries" id="events"></div>
-<div class="actions"><button id="save">Salvar aplicação</button><button id="rotate" class="secondary">Gerar / trocar chave da aplicação</button><button id="test" class="secondary">Teste: todos os ativos</button></div>
+<div class="actions"><button id="save">Salvar aplicação</button><button id="rotate" class="secondary">Gerar / trocar chave</button><button id="test" class="secondary">Teste: todos os ativos</button></div>
+<div class="hr"></div>
+<div id="providerBox" class="hide">
+<div class="row" style="justify-content:space-between"><h2>Número remetente W-API</h2><span class="pill" id="providerStatus">Verificando...</span></div>
+<p class="small" id="providerInfo">Para compartilhar o número já conectado, não é necessário configurar nada.</p>
+<details id="ownProvider"><summary>Usar outra instância W-API nesta aplicação</summary>
+<div class="formgrid">
+<div><label for="instanceId">ID da instância</label><input id="instanceId" autocomplete="off" placeholder="ID da W-API"></div>
+<div><label for="instanceToken">Token de acesso da instância</label><input id="instanceToken" type="password" autocomplete="off" placeholder="Não é a API Key geral"></div>
+</div>
+<div class="actions"><button id="saveProvider" class="secondary">Salvar conexão</button><button id="useGlobal" class="secondary">Usar número compartilhado</button></div>
+<p class="small">Credenciais criptografadas no servidor. Não aparecem depois de salvas. Alterar a chave administrativa geral exige migrar estas credenciais.</p></details>
+</div>
 <div class="hide" id="keyBox"><label>Chave gerada (copie agora; não será exibida novamente)</label><pre id="newKey"></pre><button id="copyKey" class="secondary">Copiar chave</button></div>
-<p class="small">A chave da aplicação vai no Secret do Worker que solicita envios. Não coloque chaves em HTML, Apps Script público ou GitHub.</p>
+<p class="small">A chave de integração aparece uma única vez. Configure-a na origem dos eventos, nunca em HTML público.</p>
+</div>
+<div class="card hide" id="sendCard">
+<div class="row" style="justify-content:space-between"><h2>Enviar mensagem agora</h2><span class="pill">Sem programação</span></div>
+<p class="small">Escolha o evento e os destinatários. O texto será enviado pelo provedor da aplicação.</p>
+<label for="sendEvent">Evento</label><select id="sendEvent"></select>
+<label for="sendMessage">Mensagem</label><textarea rows="5" id="sendMessage" placeholder="Digite o conteúdo do WhatsApp"></textarea>
+<div class="row" style="justify-content:space-between"><label>Destinatários ativos</label><button type="button" id="selectAll" class="secondary">Selecionar todos</button></div>
+<div id="sendRecipients" class="sendRecipients"></div>
+<div class="actions"><button id="sendNow">Enviar mensagem</button></div>
+</div>
+<div class="card hide" id="integrationCard">
+<h2>Integrar outra aplicação</h2>
+<p class="small">Você não precisa criar outro Worker. Na origem do evento, basta fazer uma chamada HTTPS à central. A chave da aplicação é secreta.</p>
+<label for="apiEndpoint">Endereço único de envio</label><input id="apiEndpoint" readonly>
+<label for="integrationEvent">Gatilho / evento</label><select id="integrationEvent"></select>
+<label for="integrationExample">Exemplo da requisição (backend)</label><textarea id="integrationExample" readonly rows="12" spellcheck="false"></textarea>
+<div class="actions"><button id="copyExample" class="secondary">Copiar exemplo</button></div>
+<p class="small">A aplicação precisa comunicar quando o evento ocorrer. Isso é uma integração inicial por aplicação, mas novos destinatários, textos e eventos são administrados aqui.</p>
 </div>
 <div class="card hide" id="historyCard"><div class="row" style="justify-content:space-between"><h2>Histórico de envios</h2><button class="secondary" id="closeHistory">Fechar</button></div>
 <p class="small">ACEITO significa aceito pelo provedor, não entregue. O status muda quando o webhook de entrega está configurado.</p>
-<div class="tablewrap"><table><thead><tr><th>Data</th><th>Aplicação</th><th>Evento</th><th>Destino</th><th>Situação</th><th>ID Omni</th></tr></thead><tbody id="historyRows"></tbody></table></div></div>
+<div class="tablewrap"><table><thead><tr><th>Data</th><th>Aplicação</th><th>Evento</th><th>Destino</th><th>Situação</th><th>ID provedor</th></tr></thead><tbody id="historyRows"></tbody></table></div></div>
 </div></section></main>
 <script>
 "use strict";
