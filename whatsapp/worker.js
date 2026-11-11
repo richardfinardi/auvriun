@@ -251,6 +251,204 @@ async function dispatch(env,app,payload) {
       ". "+(firstFailure?.error||("HTTP "+(firstFailure?.http||"indisponível")))}:{}),
     note:"ACCEPTED significa aceite pela API, não comprova entrega no WhatsApp.",results};
 }
+
+/* PSTEC / NOVA OC COM TITULO A PAGAR
+   Fontes validadas no repo PSTEC: 03_compras_ocs (vinculadas a OS ativas)
+   e 05_compras_financeiro (valores de titulos). Nao presumir pagamento a partir
+   da emissao da OC: enviar somente quando ha saldo positivo comprovado. */
+const PSTEC_MONITOR_CONFIG="monitor:pstec-oc:config";
+const PSTEC_MONITOR_STATE="monitor:pstec-oc:state";
+const PSTEC_OC_ENDPOINT="https://pstec.consultoriarf.net/03_compras_ocs";
+const PSTEC_FIN_ENDPOINT="https://pstec.consultoriarf.net/05_compras_financeiro";
+const PSTEC_MONITOR_EVENT="oc_pagamento_pendente";
+
+function dataset(data){
+  if(Array.isArray(data))return data;
+  for(const name of ["dados","data","registros","rows","items","results","resultado"]){
+    if(Array.isArray(data?.[name]))return data[name];
+    if(Array.isArray(data?.[name]?.dados))return data[name].dados;
+  }
+  throw Error("Endpoint PSTEC não retornou uma lista de dados");
+}
+async function pstecSource(url){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),16000);
+  try{
+    const response=await fetch(url,{
+      method:"GET",headers:{"accept":"application/json"},cache:"no-store",redirect:"error",
+      signal:controller.signal
+    });
+    if(!response.ok)throw Error("PSTEC respondeu HTTP "+response.status+" em "+new URL(url).pathname);
+    const text=await response.text();
+    if(text.length>7_000_000)throw Error("Endpoint PSTEC retornou dados demais");
+    let obj;try{obj=JSON.parse(text)}catch{throw Error("Endpoint PSTEC não retornou JSON válido")}
+    return dataset(obj);
+  }finally{clearTimeout(timer)}
+}
+function numPstec(input){
+  if(typeof input==="number")return Number.isFinite(input)?input:0;
+  const v=String(input??"").trim().replace(/\s/g,"");
+  if(!v)return 0;
+  const norm=v.includes(",")?v.replace(/\./g,"").replace(",","."):v;
+  return Number(norm)||0;
+}
+function brl(value){return new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(value)}
+function ocIdentity(row){
+  const company=String(row?.cod_empresa??"").trim(),number=String(row?.cod_oc??"").trim();
+  if(!company||!number||number==="0")return "";
+  return company+"|"+number;
+}
+async function pstecSnapshot(){
+  const [ocLines,financial]=await Promise.all([pstecSource(PSTEC_OC_ENDPOINT),pstecSource(PSTEC_FIN_ENDPOINT)]);
+  if(ocLines.length===0)throw Error("Endpoint de OCs da PSTEC está vazio. A sincronização foi interrompida por segurança.");
+  if(ocLines.length>60000||financial.length>60000)throw Error("Dados da PSTEC excedem limite do monitor");
+  const ocs=new Map();
+  for(const row of ocLines){
+    const id=ocIdentity(row);if(!id)continue;
+    let entry=ocs.get(id);
+    if(!entry){
+      entry={id,empresa:String(row.cod_empresa),oc:String(row.cod_oc),
+        fornecedor:limitText(row.fornecedor||"",100),codFornecedor:String(row.cod_fornecedor??""),
+        data:limitText(row.dt_oc||"",40),total:numPstec(row.valor_total_oc),os:new Set()};
+      ocs.set(id,entry);
+    }
+    if(row.cod_os!==null&&row.cod_os!==undefined)entry.os.add(String(row.cod_os));
+  }
+  const money=new Map();
+  for(const f of financial){
+    const id=ocIdentity(f);if(!id)continue;
+    const previous=money.get(id)||{titulos:0,pagar:0,pago:0};
+    previous.titulos++;
+    previous.pagar+=Math.max(0,numPstec(f.valor)-numPstec(f.valor_pago));
+    previous.pago+=Math.max(0,numPstec(f.valor_pago));
+    money.set(id,previous);
+  }
+  for(const [id,oc] of ocs){oc.os=[...oc.os].slice(0,15);oc.financeiro=money.get(id)||{titulos:0,pagar:0,pago:0};}
+  return {ocs,linhas:ocLines.length,titulos:financial.length};
+}
+function pstecMessage(oc){
+  return [
+    "*PSTEC | NOVA OC COM PAGAMENTO PENDENTE*","",
+    "*Empresa:* "+oc.empresa,
+    "*OC:* "+oc.oc,
+    "*Fornecedor:* "+oc.fornecedor,
+    "*Emissão:* "+oc.data,
+    "*Valor da OC:* "+brl(oc.total),
+    "*Saldo financeiro a pagar:* "+brl(oc.financeiro.pagar),
+    "*Títulos vinculados:* "+oc.financeiro.titulos,
+    ...(oc.os.length?["*OS vinculadas:* "+oc.os.join(", ")]:[]),
+    "","Verificar e providenciar o pagamento no CPS."
+  ].join("\n");
+}
+async function pstecMonitorStatus(env){
+  const [conf,state]=await Promise.all([
+    env.AUVRIUN_KV.get(PSTEC_MONITOR_CONFIG,{type:"json"}),
+    env.AUVRIUN_KV.get(PSTEC_MONITOR_STATE,{type:"json"})
+  ]);
+  return {configured:!!conf,enabled:!!conf?.enabled,initialized:!!state?.initialized,
+    app:conf?.app||"pstec",event:conf?.event||PSTEC_MONITOR_EVENT,
+    lastRun:state?.lastRun||null,lastResult:state?.lastResult||null,
+    registered:state?Object.keys(state.seen||{}).length:0};
+}
+async function pstecMonitorSetup(env){
+  const appId="pstec";
+  let app=await appRead(env,appId);
+  if(!app){
+    app=validateApp(appId,{name:"PSTEC",provider:"WAPI",brand:"CONSULTORIARF",
+      active:true,recipients:[],events:[{id:PSTEC_MONITOR_EVENT,mode:"TEXT",active:true,text:""}]},null);
+  }else if(!app.events?.some(e=>e.id===PSTEC_MONITOR_EVENT)){
+    app=validateApp(appId,{...app,events:[...app.events,{id:PSTEC_MONITOR_EVENT,mode:"TEXT",active:true,text:""}]},app);
+  }
+  await env.AUVRIUN_KV.put("app:"+appId,JSON.stringify(app));
+  const old=await env.AUVRIUN_KV.get(PSTEC_MONITOR_CONFIG,{type:"json"});
+  const conf=old||{app:appId,event:PSTEC_MONITOR_EVENT,enabled:false,
+    createdAt:new Date().toISOString()};
+  await env.AUVRIUN_KV.put(PSTEC_MONITOR_CONFIG,JSON.stringify(conf));
+  return {ok:true,app:appId,event:PSTEC_MONITOR_EVENT,
+    message:"Regra criada. Configure destinatários na aplicação PSTEC e registre o estado inicial antes de ativar."};
+}
+async function pstecMonitorBaseline(env){
+  const config=await env.AUVRIUN_KV.get(PSTEC_MONITOR_CONFIG,{type:"json"});
+  if(!config)throw Error("Crie a regra primeiro");
+  if(config.enabled)throw Error("Desative a regra antes de registrar o estado inicial");
+  const current=await env.AUVRIUN_KV.get(PSTEC_MONITOR_STATE,{type:"json"});
+  if(current?.initialized)throw Error("Estado inicial já registrado. Não é necessário repetir.");
+  const snap=await pstecSnapshot();
+  if(snap.ocs.size===0)throw Error("Nenhuma OC identificada. Não foi possível iniciar.");
+  const seen={};
+  for(const oc of snap.ocs.values())seen[oc.id]={legacy:true,notified:true};
+  const result={found:snap.ocs.size,lines:snap.linhas,financialTitles:snap.titulos,
+    newOrders:0,eligible:0,notified:0,pendingTitles:0,errors:[],mode:"baseline"};
+  const state={initialized:true,createdAt:new Date().toISOString(),lastRun:new Date().toISOString(),
+    lastResult:result,seen};
+  if(JSON.stringify(state).length>8_000_000)throw Error("Estado inicial muito grande");
+  await env.AUVRIUN_KV.put(PSTEC_MONITOR_STATE,JSON.stringify(state));
+  return {ok:true,...result,message:"Estado inicial gravado: nenhuma OC antiga receberá alerta."};
+}
+async function pstecMonitorCheck(env,{live=false}={}){
+  const [config,state]=await Promise.all([
+    env.AUVRIUN_KV.get(PSTEC_MONITOR_CONFIG,{type:"json"}),
+    env.AUVRIUN_KV.get(PSTEC_MONITOR_STATE,{type:"json"})
+  ]);
+  if(!config||!state?.initialized)throw Error("Crie a regra e registre o estado inicial");
+  if(live&&!config.enabled)return {ok:true,skipped:true,reason:"Regra desativada"};
+  const snap=await pstecSnapshot();
+  const app=await appRead(env,config.app);
+  const seen=state.seen||{},candidate=[];
+  let newOrders=0,pendingTitles=0;
+  for(const oc of snap.ocs.values()){
+    if(!seen[oc.id]){
+      newOrders++;
+      if(live)seen[oc.id]={legacy:false,notified:false,firstSeen:new Date().toISOString()};
+    }
+    const track=seen[oc.id];
+    if((track&&!track.legacy&&!track.notified)||(!track&&!live)){
+      if(oc.financeiro.titulos&&oc.financeiro.pagar>.01)candidate.push(oc);
+      else if(!oc.financeiro.titulos)pendingTitles++;
+    }
+  }
+  const result={found:snap.ocs.size,lines:snap.linhas,financialTitles:snap.titulos,
+    newOrders,eligible:candidate.length,pendingTitles,notified:0,errors:[],
+    examples:candidate.slice(0,5).map(x=>({oc:x.oc,empresa:x.empresa,
+      fornecedor:x.fornecedor,saldo:x.financeiro.pagar})),mode:live?"live":"preview"};
+  if(live && candidate.length){
+    if(!app?.active||!app.events.some(e=>e.id===config.event&&e.active))
+      throw Error("A aplicação PSTEC e o evento devem estar ativos");
+    if(!app.recipients.some(r=>r.active))throw Error("Cadastre um destinatário ativo na aplicação PSTEC");
+    for(const oc of candidate.slice(0,10)){
+      try{
+        const sent=await dispatch(env,app,{
+          __admin:true,event:config.event,reference:"OC:"+oc.id,message:pstecMessage(oc)
+        });
+        if(sent.accepted===sent.requested){
+          seen[oc.id].notified=true;seen[oc.id].notifiedAt=new Date().toISOString();
+          result.notified++;
+        }else result.errors.push("OC "+oc.oc+": "+(sent.error||"Envio parcialmente aceito"));
+      }catch(e){result.errors.push("OC "+oc.oc+": "+limitText(e?.message||e,120));}
+    }
+  }
+  if(live){
+    state.lastRun=new Date().toISOString();state.lastResult=result;state.seen=seen;
+    if(JSON.stringify(state).length>8_000_000)throw Error("Estado do monitor excedeu o limite");
+    await env.AUVRIUN_KV.put(PSTEC_MONITOR_STATE,JSON.stringify(state));
+  }
+  return {ok:true,...result};
+}
+async function pstecMonitorSwitch(env,enabled){
+  const status=await pstecMonitorStatus(env);
+  if(!status.configured||!status.initialized)throw Error("Crie a regra e registre o estado inicial");
+  const conf=await env.AUVRIUN_KV.get(PSTEC_MONITOR_CONFIG,{type:"json"});
+  const app=await appRead(env,"pstec");
+  if(enabled){
+    if(!app?.active||!app.events?.some(e=>e.id===PSTEC_MONITOR_EVENT&&e.active&&e.mode==="TEXT"))
+      throw Error("Cadastre e ative o evento oc_pagamento_pendente na aplicação PSTEC");
+    if(!app.recipients?.some(r=>r.active))throw Error("Cadastre um destinatário ativo na PSTEC");
+    await providerCredentials(env,app); // valida chave/instância antes de ativar
+  }
+  conf.enabled=!!enabled;
+  await env.AUVRIUN_KV.put(PSTEC_MONITOR_CONFIG,JSON.stringify(conf));
+  return {ok:true,enabled:conf.enabled,message:enabled?"Monitor ativado. Configure o cron único no Cloudflare para execução periódica.":"Monitor desativado."};
+}
+
 async function webhook(request,env) {
   const secret=String(env.OMNI_WEBHOOK_SIGNING_SECRET||"");
   if(!secret)return new Response("Webhook não configurado",{status:503});
@@ -329,6 +527,22 @@ export default {
           const only=u.searchParams.get("app");
           return json({ok:true,history:rows.filter(r=>!only||r.app===only).slice(0,100)},200,origin);
         }
+
+        if(path==="/admin/monitors/pstec-oc"){
+          if(req.method==="GET")return json({ok:true,...await pstecMonitorStatus(env)},200,origin);
+          if(req.method==="POST"){
+            const input=await readJson(req);
+            let out;
+            if(input.action==="setup")out=await pstecMonitorSetup(env);
+            else if(input.action==="baseline")out=await pstecMonitorBaseline(env);
+            else if(input.action==="preview")out=await pstecMonitorCheck(env,{live:false});
+            else if(input.action==="check")out=await pstecMonitorCheck(env,{live:true});
+            else if(input.action==="enable")out=await pstecMonitorSwitch(env,true);
+            else if(input.action==="disable")out=await pstecMonitorSwitch(env,false);
+            else return fail("Ação do monitor desconhecida",400,origin);
+            return json(out,200,origin);
+          }
+        }
         const providerRoute=path.match(/^\/admin\/apps\/([a-z][a-z0-9_-]{1,39})\/provider$/);
         if(providerRoute){
           const id=providerRoute[1],existing=await appRead(env,id);
@@ -392,5 +606,9 @@ export default {
       }catch(e){return fail(limitText(e?.message||e,200),400,origin);}
     }
     return fail("Rota não encontrada",404,origin);
+  },
+  async scheduled(controller,env,ctx){
+    ctx.waitUntil(pstecMonitorCheck(env,{live:true}).catch(err=>
+      console.error("PSTEC MONITOR OC",String(err?.message||err))));
   }
 };
