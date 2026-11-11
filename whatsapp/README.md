@@ -1,5 +1,21 @@
 # AUVRIUN WhatsApp Hub
 
+## Operação diária: tudo pelo painel (atualização 11/11/2026)
+
+Após publicar uma única vez a versão nova de `whatsapp/worker.js` no Cloudflare, as configurações rotineiras são feitas **em `https://auvriun.com/whatsapp/`**:
+- **+ Nova**: cadastra aplicação, seleciona provedor, marca e destinatários, cria eventos. Ao salvar a nova aplicação, a chave de integração é gerada automaticamente e exibida uma única vez.
+- **Número remetente W-API**: por padrão, reutiliza a instância compartilhada já configurada no Cloudflare. Se quiser outro número por cliente, expanda **Usar outra instância W-API nesta aplicação**, digite ID e Token de Acesso, e salve. O token fica criptografado no KV via AES-GCM, derivado de `AUVRIUN_ADMIN_KEY`, e não retorna ao navegador.
+- **Enviar mensagem agora**: escolha evento, escreva texto, marque destinatários ativos e envie sem alterar nenhuma aplicação.
+- **Integrar outra aplicação**: copie o endereço de envio, evento e formato JSON. Esse endereço é compartilhado por todas as aplicações. Cada sistema de origem precisa enviar um POST ao ocorrer o gatilho, **uma vez por sistema**; não é possível detectar automaticamente eventos de aplicações isoladas sem essa integração.
+- **Histórico**: lista os registros de aceite e, para Omni quando webhook configurado, evolução do status. Na W-API, ainda não existe webhook central de entrega; aceite não comprova recebimento.
+
+Segurança:
+- Não grave a chave de aplicação no JavaScript do navegador nem no GitHub. Guarde-a no backend de cada sistema que dispara notificações.
+- `AUVRIUN_ADMIN_KEY` é o segredo que também cifra os tokens W-API individuais. Se for alterado, é preciso **reconfigurar os tokens individuais** depois, pois eles não serão descriptografados com a nova chave. A instância global via Secrets permanece disponível.
+- Preserve as credenciais globais W-API existentes até testar qualquer instância exclusiva. Mudar o provedor de uma aplicação não muda o das demais.
+- A UI GitHub Pages atualiza automaticamente após publicar o repositório, mas o Worker continua exigindo deploy manual quando o **código da central** é alterado, não quando você cadastra clientes/eventos/telefones.
+
+
 Centraliza a **Z-API Omni / WhatsApp Oficial** em um Cloudflare Worker. As aplicações (ANFEER, PSTEC, SINTERCAN, COLUMBIA, BRASTORNO etc.) passam a chamar uma única API, cada uma com sua própria chave e eventos autorizados. O painel web é `https://auvriun.com/whatsapp/`.
 
 ## O que está pronto no repositório
