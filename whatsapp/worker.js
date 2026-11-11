@@ -275,7 +275,7 @@ async function pstecSource(url){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),16000);
   try{
     const response=await fetch(url,{
-      method:"GET",headers:{"accept":"application/json"},cache:"no-store",redirect:"error",
+      method:"GET",headers:{"accept":"application/json"},cache:"no-store",redirect:"follow",
       signal:controller.signal
     });
     if(!response.ok)throw Error("PSTEC respondeu HTTP "+response.status+" em "+new URL(url).pathname);
