@@ -49,6 +49,7 @@ function validateApp(id,input,previous) {
   const name=limitText(input.name,80);
   if(name.length<2)throw new Error("Informe o nome da aplicação");
   const brand= input.brand==="CONSULTORIARF" ? "CONSULTORIARF" : "AUVRIUN";
+  const provider=input.provider==="WAPI"?"WAPI":"OMNI";
   const recipients=Array.isArray(input.recipients)?input.recipients:[];
   if(recipients.length>30)throw new Error("Máximo de 30 destinatários por aplicação");
   const seen=new Set();
@@ -77,7 +78,7 @@ function validateApp(id,input,previous) {
     }
     return {id:event,mode,text:limitText(e?.text,4000),content,active:e.active!==false};
   });
-  return {id,name,brand,active:input.active!==false,recipients:normalized,events:normalizedEvents,
+  return {id,name,brand,provider,active:input.active!==false,recipients:normalized,events:normalizedEvents,
     keyHash:previous?.keyHash||null,createdAt:previous?.createdAt||new Date().toISOString(),
     updatedAt:new Date().toISOString()};
 }
@@ -103,25 +104,39 @@ function historyKey(){
 async function sendOne(env,app,event,recipient,content,reference,origin) {
   const key=historyKey(),started=new Date().toISOString();
   const record={id:key,app:app.id,event:event.id,reference:limitText(reference,100),
-    recipient:recipient.name,phoneFinal:recipient.phone.slice(-4),createdAt:started,
+    recipient:recipient.name,phoneFinal:recipient.phone.slice(-4),provider:app.provider||"OMNI",createdAt:started,
     status:"REQUESTED",messageId:null,http:null};
   try {
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),12000);
     let response;
     try {
-      response=await fetch(API+encodeURIComponent(String(env.OMNI_CHANNEL_ID))+"/messages",{
-        method:"POST",headers:{"content-type":"application/json",
-          "authorization":"Bearer "+env.OMNI_SECRET_KEY},
-        body:JSON.stringify({recipient:{identifier:recipient.phone},content}),signal:controller.signal});
+      if(app.provider==="WAPI"){
+        const instance=String(env.WAPI_INSTANCE_ID).trim();
+        response=await fetch("https://api.w-api.app/v1/message/send-text?instanceId="+encodeURIComponent(instance),{
+          method:"POST",headers:{"content-type":"application/json",
+            "authorization":"Bearer "+env.WAPI_TOKEN},
+          body:JSON.stringify({phone:recipient.phone,message:content.body.message}),
+          signal:controller.signal
+        });
+      }else{
+        response=await fetch(API+encodeURIComponent(String(env.OMNI_CHANNEL_ID))+"/messages",{
+          method:"POST",headers:{"content-type":"application/json",
+            "authorization":"Bearer "+env.OMNI_SECRET_KEY},
+          body:JSON.stringify({recipient:{identifier:recipient.phone},content}),signal:controller.signal
+        });
+      }
     }finally{clearTimeout(timer);}
     const raw=(await response.text()).slice(0,5000);
     let result={};try{result=JSON.parse(raw)||{};}catch{}
-    const id=result.messageId||result.data?.messageId||result.id||result.data?.id||null;
+    const id=result.messageId||result.data?.messageId||result.id||result.data?.id||result.key?.id||null;
     record.messageId=id?String(id).slice(0,120):null;
     record.http=response.status;
-    record.status=response.ok&&result.ok!==false&&result.success!==false?"ACCEPTED":"REJECTED";
-    if(record.status==="REJECTED")record.error=limitText(result.error||result.message||"Recusado pela Omni",200);
+    const rejected=result.ok===false||result.success===false||result.error===true||typeof result.error==="string"&&!!result.error;
+    record.status=response.ok&&!rejected?"ACCEPTED":"REJECTED";
+    if(record.status==="REJECTED")record.error=limitText(
+      typeof result.message==="string"?result.message:typeof result.error==="string"?result.error:
+      "Recusado pelo provedor",200);
     if(record.messageId && record.status==="ACCEPTED")
       await env.AUVRIUN_KV.put("message:"+record.messageId,key,{expirationTtl:MAX_HISTORY_AGE});
   }catch(error){record.status="ERROR";record.error=limitText(error?.message||error,200);}
@@ -137,7 +152,13 @@ async function dispatch(env,app,payload) {
   if(!app.keyHash && !payload.__admin)throw new Error("Aplicação sem chave");
   const event=app.events.find(e=>e.id===payload.event&&e.active);
   if(!event)throw new Error("Evento não autorizado para a aplicação");
-  if(!env.OMNI_SECRET_KEY || !env.OMNI_CHANNEL_ID)throw new Error("Configure OMNI_SECRET_KEY e OMNI_CHANNEL_ID");
+  if(app.provider==="WAPI"){
+    if(!env.WAPI_TOKEN || !env.WAPI_INSTANCE_ID)throw new Error("Configure WAPI_TOKEN e WAPI_INSTANCE_ID nos Secrets Cloudflare");
+    if(!/^[A-Za-z0-9_-]{6,100}$/.test(String(env.WAPI_INSTANCE_ID).trim()))throw new Error("ID da instância W-API inválido");
+    if(event.mode!=="TEXT")throw new Error("A W-API requer evento do tipo Texto");
+  }else if(!env.OMNI_SECRET_KEY || !env.OMNI_CHANNEL_ID){
+    throw new Error("Configure OMNI_SECRET_KEY e OMNI_CHANNEL_ID");
+  }
   let selected=app.recipients.filter(r=>r.active);
   if(payload.only!==undefined){
     if(!Array.isArray(payload.only)||payload.only.length>30)throw new Error("Seleção de destinatários inválida");
@@ -165,7 +186,7 @@ async function dispatch(env,app,payload) {
   const results=await Promise.all(selected.map(r=>sendOne(env,app,event,r,content,payload.reference,"")));
   return {ok:results.some(r=>r.status==="ACCEPTED"),app:app.id,event:event.id,
     requested:results.length,accepted:results.filter(r=>r.status==="ACCEPTED").length,
-    note:"ACCEPTED significa aceite pela Omni, não entrega no WhatsApp.",results};
+    provider:app.provider||"OMNI",note:"ACCEPTED significa aceite pela API, não comprova entrega no WhatsApp.",results};
 }
 async function webhook(request,env) {
   const secret=String(env.OMNI_WEBHOOK_SIGNING_SECRET||"");
@@ -229,7 +250,7 @@ export default {
       try{return await webhook(req,env);}catch(e){console.error("AUVRIUN WEBHOOK",String(e));return new Response("Falha no webhook",{status:500});}
     }
     if(path==="/health"&&req.method==="GET")
-      return json({ok:true,service:"AUVRIUN WhatsApp Hub",kv:!!env.AUVRIUN_KV,providerConfigured:!!(env.OMNI_SECRET_KEY&&env.OMNI_CHANNEL_ID)},200,origin);
+      return json({ok:true,service:"AUVRIUN WhatsApp Hub",kv:!!env.AUVRIUN_KV,providerConfigured:!!(env.OMNI_SECRET_KEY&&env.OMNI_CHANNEL_ID),omniConfigured:!!(env.OMNI_SECRET_KEY&&env.OMNI_CHANNEL_ID),wapiConfigured:!!(env.WAPI_TOKEN&&env.WAPI_INSTANCE_ID)},200,origin);
     if(!env.AUVRIUN_KV)return fail("Vincule o KV AUVRIUN_KV ao Worker",503,origin);
     if(path.startsWith("/admin/")){
       if(!await authorizedAdmin(req,env))return fail("Chave administrativa inválida",401,origin);
