@@ -132,11 +132,21 @@ async function sendOne(env,app,event,recipient,content,reference,origin) {
     const id=result.messageId||result.data?.messageId||result.id||result.data?.id||result.key?.id||null;
     record.messageId=id?String(id).slice(0,120):null;
     record.http=response.status;
-    const rejected=result.ok===false||result.success===false||result.error===true||typeof result.error==="string"&&!!result.error;
+    const rejected=result.ok===false||result.success===false||result.error===true||
+      typeof result.error==="string"&&!!result.error||result.status===false;
     record.status=response.ok&&!rejected?"ACCEPTED":"REJECTED";
-    if(record.status==="REJECTED")record.error=limitText(
-      typeof result.message==="string"?result.message:typeof result.error==="string"?result.error:
-      "Recusado pelo provedor",200);
+    if(record.status==="REJECTED"){
+      const providerMessage=
+        typeof result.message==="string"?result.message:
+        typeof result.error==="string"?result.error:
+        typeof result.error?.message==="string"?result.error.message:
+        typeof result.data?.message==="string"?result.data.message:
+        typeof result.details==="string"?result.details:"Falha sem detalhe do provedor";
+      // Nunca reproduzir credenciais que um upstream possa incluir na mensagem de erro.
+      const safeMessage=String(providerMessage).replace(/Bearer\s+[^\s"'<>]+/gi,"Bearer [oculto]")
+        .replace(/(?:token|api[_-]?key|secret)\s*[:=]\s*[^\s,;"'<>]+/gi,"credencial=[oculta]");
+      record.error="HTTP "+response.status+" - "+limitText(safeMessage,180);
+    }
     if(record.messageId && record.status==="ACCEPTED")
       await env.AUVRIUN_KV.put("message:"+record.messageId,key,{expirationTtl:MAX_HISTORY_AGE});
   }catch(error){record.status="ERROR";record.error=limitText(error?.message||error,200);}
@@ -184,9 +194,14 @@ async function dispatch(env,app,payload) {
     content={type:"TEXT",body:{message:text}};
   }
   const results=await Promise.all(selected.map(r=>sendOne(env,app,event,r,content,payload.reference,"")));
-  return {ok:results.some(r=>r.status==="ACCEPTED"),app:app.id,event:event.id,
-    requested:results.length,accepted:results.filter(r=>r.status==="ACCEPTED").length,
-    provider:app.provider||"OMNI",note:"ACCEPTED significa aceite pela API, não comprova entrega no WhatsApp.",results};
+  const accepted=results.filter(r=>r.status==="ACCEPTED").length;
+  const firstFailure=results.find(r=>r.status!=="ACCEPTED");
+  return {ok:accepted>0,app:app.id,event:event.id,
+    requested:results.length,accepted,
+    provider:app.provider||"OMNI",
+    ...(accepted===0?{error:"Nenhum envio aceito pela "+(app.provider==="WAPI"?"W-API":"Omni")+
+      ". "+(firstFailure?.error||("HTTP "+(firstFailure?.http||"indisponível")))}:{}),
+    note:"ACCEPTED significa aceite pela API, não comprova entrega no WhatsApp.",results};
 }
 async function webhook(request,env) {
   const secret=String(env.OMNI_WEBHOOK_SIGNING_SECRET||"");
