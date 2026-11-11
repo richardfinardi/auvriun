@@ -259,6 +259,7 @@ async function dispatch(env,app,payload) {
 const PSTEC_MONITOR_CONFIG="monitor:pstec-oc:config";
 const PSTEC_MONITOR_STATE="monitor:pstec-oc:state";
 const PSTEC_OC_ENDPOINT="https://pstec.consultoriarf.net/03_compras_ocs";
+const PSTEC_SERV_ENDPOINT="https://pstec.consultoriarf.net/07_compras_servicos";
 const PSTEC_FIN_ENDPOINT="https://pstec.consultoriarf.net/05_compras_financeiro";
 const PSTEC_MONITOR_EVENT="oc_pagamento_pendente";
 const PSTEC_MONITOR_APP="compras_pstec";
@@ -299,32 +300,75 @@ function ocIdentity(row){
   return company+"|"+number;
 }
 async function pstecSnapshot(){
-  const [ocLines,financial]=await Promise.all([pstecSource(PSTEC_OC_ENDPOINT),pstecSource(PSTEC_FIN_ENDPOINT)]);
-  if(ocLines.length===0)throw Error("Endpoint de OCs da PSTEC está vazio. A sincronização foi interrompida por segurança.");
-  if(ocLines.length>60000||financial.length>60000)throw Error("Dados da PSTEC excedem limite do monitor");
-  const ocs=new Map();
-  for(const row of ocLines){
-    const id=ocIdentity(row);if(!id)continue;
-    let entry=ocs.get(id);
-    if(!entry){
-      entry={id,empresa:String(row.cod_empresa),oc:String(row.cod_oc),
-        fornecedor:limitText(row.fornecedor||"",100),codFornecedor:String(row.cod_fornecedor??""),
-        data:limitText(row.dt_oc||"",40),total:numPstec(row.valor_total_oc),os:new Set()};
-      ocs.set(id,entry);
+  // OC única por cod_empresa + cod_oc. Uma OC pode conter materiais e serviços.
+  const [materials,services,financial]=await Promise.all([
+    pstecSource(PSTEC_OC_ENDPOINT),pstecSource(PSTEC_SERV_ENDPOINT),
+    pstecSource(PSTEC_FIN_ENDPOINT)
+  ]);
+  if(!materials.length&&!services.length)
+    throw Error("PSTEC não retornou OCs de materiais nem serviços. Monitor interrompido.");
+  if([materials,services,financial].some(x=>x.length>60000))
+    throw Error("Dados PSTEC acima do limite do monitor");
+  const ocs=new Map(),servFin=new Map();
+  function record(row,type){
+    const id=ocIdentity(row);
+    if(!id)return;
+    let oc=ocs.get(id);
+    if(!oc){
+      oc={id,empresa:String(row.cod_empresa),oc:String(row.cod_oc),
+        fornecedor:limitText(row.fornecedor||"",100),
+        codFornecedor:String(row.cod_fornecedor??""),
+        data:limitText(row.dt_oc||"",40),total:numPstec(row.valor_total_oc),
+        os:new Set(),tipos:new Set()};
+      ocs.set(id,oc);
     }
-    if(row.cod_os!==null&&row.cod_os!==undefined)entry.os.add(String(row.cod_os));
+    oc.tipos.add(type);
+    if(!oc.fornecedor&&row.fornecedor)oc.fornecedor=limitText(row.fornecedor,100);
+    if(!oc.data&&row.dt_oc)oc.data=limitText(row.dt_oc,40);
+    if(!oc.total&&row.valor_total_oc)oc.total=numPstec(row.valor_total_oc);
+    if(row.cod_os!=null)oc.os.add(String(row.cod_os));
+    if(type==="SERVICO"){
+      // Endpoint 07 repete o resumo financeiro por item. Nunca somá-lo.
+      const fin={titulos:numPstec(row.qtd_titulos_oc),
+        pagar:Math.max(0,numPstec(row.saldo_pagar_oc)),
+        pago:Math.max(0,numPstec(row.valor_pago_oc))};
+      const prev=servFin.get(id);
+      if(fin.titulos>0&&(!prev||fin.titulos>prev.titulos||
+        (fin.titulos===prev.titulos&&fin.pagar>prev.pagar)))servFin.set(id,fin);
+    }
   }
+  for(const x of materials)record(x,"MATERIAL");
+  for(const x of services)record(x,"SERVICO");
   const money=new Map();
   for(const f of financial){
     const id=ocIdentity(f);if(!id)continue;
-    const previous=money.get(id)||{titulos:0,pagar:0,pago:0};
-    previous.titulos++;
-    previous.pagar+=Math.max(0,numPstec(f.valor)-numPstec(f.valor_pago));
-    previous.pago+=Math.max(0,numPstec(f.valor_pago));
-    money.set(id,previous);
+    const a=money.get(id)||{titulos:0,pagar:0,pago:0};
+    a.titulos++;
+    a.pagar+=Math.max(0,numPstec(f.valor)-numPstec(f.valor_pago));
+    a.pago+=Math.max(0,numPstec(f.valor_pago));
+    money.set(id,a);
   }
-  for(const [id,oc] of ocs){oc.os=[...oc.os].slice(0,15);oc.financeiro=money.get(id)||{titulos:0,pagar:0,pago:0};}
-  return {ocs,linhas:ocLines.length,titulos:financial.length};
+  let onlyMaterials=0,onlyServices=0,mixed=0;
+  for(const [id,oc] of ocs){
+    const m=oc.tipos.has("MATERIAL"),v=oc.tipos.has("SERVICO");
+    if(m&&v)mixed++;else if(m)onlyMaterials++;else if(v)onlyServices++;
+    oc.os=[...oc.os].slice(0,15);
+    oc.tipos=[...oc.tipos];
+    // Priorizar títulos do financeiro global (05). Serviço (07) é fallback.
+    oc.financeiro=money.get(id)||servFin.get(id)||{titulos:0,pagar:0,pago:0};
+  }
+  return {ocs,linhas:materials.length+services.length,
+    linhasMaterial:materials.length,linhasServico:services.length,
+    onlyMaterials,onlyServices,mixed,titulos:financial.length};
+}
+function datePstec(value){
+  const raw=String(value??"").trim();
+  // JSON da API pode serializar DATE como 2026-11-11T00:00:00.000Z.
+  // Exibir só DD/MM/AAAA, sem interpretar fuso nem inserir hora.
+  const match=raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/);
+  if(match)return match[3]+"/"+match[2]+"/"+match[1];
+  if(/^\d{2}\/\d{2}\/\d{4}$/.test(raw))return raw;
+  return raw||"—";
 }
 function pstecMessage(oc){
   return [
@@ -332,7 +376,8 @@ function pstecMessage(oc){
     "*Empresa:* "+oc.empresa,
     "*OC:* "+oc.oc,
     "*Fornecedor:* "+oc.fornecedor,
-    "*Emissão:* "+oc.data,
+    "*Tipo:* "+oc.tipos.join(" + "),
+    "*Emissão:* "+datePstec(oc.data),
     "*Valor da OC:* "+brl(oc.total),
     "*Saldo financeiro a pagar:* "+brl(oc.financeiro.pagar),
     "*Títulos vinculados:* "+oc.financeiro.titulos,
@@ -379,7 +424,7 @@ async function pstecMonitorBaseline(env){
   for(const oc of snap.ocs.values())seen[oc.id]={legacy:true,notified:true};
   const result={found:snap.ocs.size,lines:snap.linhas,financialTitles:snap.titulos,
     newOrders:0,eligible:0,notified:0,pendingTitles:0,errors:[],mode:"baseline"};
-  const state={initialized:true,createdAt:new Date().toISOString(),lastRun:new Date().toISOString(),
+  const state={initialized:true,sourcesVersion:2,createdAt:new Date().toISOString(),lastRun:new Date().toISOString(),
     lastResult:result,seen};
   if(JSON.stringify(state).length>8_000_000)throw Error("Estado inicial muito grande");
   await env.AUVRIUN_KV.put(PSTEC_MONITOR_STATE,JSON.stringify(state));
@@ -395,8 +440,18 @@ async function pstecMonitorCheck(env,{live=false}={}){
   const snap=await pstecSnapshot();
   const app=await appRead(env,config.app);
   const seen=state.seen||{},candidate=[];
-  let newOrders=0,pendingTitles=0;
+  let newOrders=0,pendingTitles=0,migratedServiceOrders=0;
   for(const oc of snap.ocs.values()){
+    // Baseline anterior só conhecia materiais. Não disparar em massa para
+    // serviços antigos na primeira execução com as duas fontes unificadas.
+    const oldService=!state.sourcesVersion&&!seen[oc.id]&&
+      oc.tipos.includes("SERVICO")&&!oc.tipos.includes("MATERIAL");
+    if(oldService){
+      migratedServiceOrders++;
+      if(live)seen[oc.id]={legacy:true,notified:true,
+        migratedAt:new Date().toISOString()};
+      continue;
+    }
     if(!seen[oc.id]){
       newOrders++;
       if(live)seen[oc.id]={legacy:false,notified:false,firstSeen:new Date().toISOString()};
@@ -407,8 +462,10 @@ async function pstecMonitorCheck(env,{live=false}={}){
       else if(!oc.financeiro.titulos)pendingTitles++;
     }
   }
-  const result={found:snap.ocs.size,lines:snap.linhas,financialTitles:snap.titulos,
-    newOrders,eligible:candidate.length,pendingTitles,notified:0,errors:[],
+  const result={found:snap.ocs.size,lines:snap.linhas,
+    materials:snap.onlyMaterials,services:snap.onlyServices,mixed:snap.mixed,
+    financialTitles:snap.titulos,newOrders,eligible:candidate.length,
+    pendingTitles,migratedServiceOrders,notified:0,errors:[],
     examples:candidate.slice(0,5).map(x=>({oc:x.oc,empresa:x.empresa,
       fornecedor:x.fornecedor,saldo:x.financeiro.pagar})),mode:live?"live":"preview"};
   if(live && candidate.length){
@@ -429,6 +486,7 @@ async function pstecMonitorCheck(env,{live=false}={}){
   }
   if(live){
     state.lastRun=new Date().toISOString();state.lastResult=result;state.seen=seen;
+    state.sourcesVersion=2;
     if(JSON.stringify(state).length>8_000_000)throw Error("Estado do monitor excedeu o limite");
     await env.AUVRIUN_KV.put(PSTEC_MONITOR_STATE,JSON.stringify(state));
   }
