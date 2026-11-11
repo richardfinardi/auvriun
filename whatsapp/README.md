@@ -106,3 +106,19 @@ O repositório `richardfinardi/anfeer` recebeu suporte opcional para a central. 
 - Para controle rigoroso de idempotência, quotas e ordem de eventos em alto volume, evoluir KV para Durable Objects/D1/Queues. A versão atual **não assegura deduplicação transacional**.
 - API atual permite até 30 destinatários por aplicação. Disparos são paralelos, limitados pela infraestrutura/provedor.
 - A lista de histórico mostra até 100 registros recentes dentro da janela consultada.
+
+
+## W-API: segundo número, sem templates oficiais
+
+O painel oferece agora **Provedor de envio**: `Z-API Omni` (padrão, mantém produção atual) ou `W-API` (número dedicado). A troca é por aplicação: seleção não afeta as outras.
+
+1. Em https://painel.w-api.app/app/instances, crie uma instância e conecte o novo número pelo QR Code. Consulte o status até a instância aparecer como conectada.
+2. No Cloudflare > Worker `auvriun-whatsapp` > Settings > Variables and Secrets, configure **Secrets**:
+   - `WAPI_TOKEN`: token de API da instância W-API.
+   - `WAPI_INSTANCE_ID`: identificador da instância W-API.
+3. Publique `worker.js` atualizado no Worker Cloudflare; atualize o painel `/whatsapp/` e, na aplicação ANFEER, selecione `W-API (número dedicado)` e salve.
+4. Use **Teste: todos os ativos** para validar o envio e o histórico. Para produção, faça teste com destinatários que consentiram com o recebimento. O status ACCEPTED não é confirmação de entrega.
+
+Endpoint oficial documentado pelo fornecedor W-API: `POST https://api.w-api.app/v1/message/send-text?instanceId=ID`, header `Authorization: Bearer TOKEN`, JSON `{ "phone": "55...", "message": "..." }`.
+
+A W-API declara expressamente que **não é API oficial da Meta**; pode existir risco de bloqueio do número, indisponibilidade e desconexão. Não use o número principal da empresa para testar. Não há necessidade de templates oficiais nessa integração, mas não há garantia de entrega. A versão atual não implementa webhook de confirmação da W-API, apenas o registro da resposta de envio.
