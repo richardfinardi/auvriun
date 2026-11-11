@@ -261,6 +261,7 @@ const PSTEC_MONITOR_STATE="monitor:pstec-oc:state";
 const PSTEC_OC_ENDPOINT="https://pstec.consultoriarf.net/03_compras_ocs";
 const PSTEC_FIN_ENDPOINT="https://pstec.consultoriarf.net/05_compras_financeiro";
 const PSTEC_MONITOR_EVENT="oc_pagamento_pendente";
+const PSTEC_MONITOR_APP="compras_pstec";
 
 function dataset(data){
   if(Array.isArray(data))return data;
@@ -345,12 +346,12 @@ async function pstecMonitorStatus(env){
     env.AUVRIUN_KV.get(PSTEC_MONITOR_STATE,{type:"json"})
   ]);
   return {configured:!!conf,enabled:!!conf?.enabled,initialized:!!state?.initialized,
-    app:conf?.app||"pstec",event:conf?.event||PSTEC_MONITOR_EVENT,
+    app:conf?.app||PSTEC_MONITOR_APP,event:conf?.event||PSTEC_MONITOR_EVENT,
     lastRun:state?.lastRun||null,lastResult:state?.lastResult||null,
     registered:state?Object.keys(state.seen||{}).length:0};
 }
 async function pstecMonitorSetup(env){
-  const appId="pstec";
+  const appId=PSTEC_MONITOR_APP;
   let app=await appRead(env,appId);
   if(!app){
     app=validateApp(appId,{name:"PSTEC",provider:"WAPI",brand:"CONSULTORIARF",
@@ -437,7 +438,7 @@ async function pstecMonitorSwitch(env,enabled){
   const status=await pstecMonitorStatus(env);
   if(!status.configured||!status.initialized)throw Error("Crie a regra e registre o estado inicial");
   const conf=await env.AUVRIUN_KV.get(PSTEC_MONITOR_CONFIG,{type:"json"});
-  const app=await appRead(env,"pstec");
+  const app=await appRead(env,PSTEC_MONITOR_APP);
   if(enabled){
     if(!app?.active||!app.events?.some(e=>e.id===PSTEC_MONITOR_EVENT&&e.active&&e.mode==="TEXT"))
       throw Error("Cadastre e ative o evento oc_pagamento_pendente na aplicação PSTEC");
