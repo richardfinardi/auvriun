@@ -153,9 +153,14 @@ function eventRow(e={id:"",mode:"TEXT",text:"",content:null,active:true}){
 }
 function edit(a){
   current=a?.id||null;$("editor").classList.remove("hide");$("appId").value=a?.id||"";$("appId").disabled=!!a;
-  $("appName").value=a?.name||"";$("appProvider").value=a?.provider||"OMNI";$("appBrand").value=a?.brand||"AUVRIUN";$("appActive").checked=a?.active!==false;$("recipients").innerHTML="";$("events").innerHTML="";
+  $("appName").value=a?.name||"";$("appProvider").value=a?.provider||"WAPI";$("appBrand").value=a?.brand||"AUVRIUN";$("appActive").checked=a?.active!==false;$("recipients").innerHTML="";$("events").innerHTML="";
   (a?.recipients||[]).forEach(recipientRow);(a?.events||[]).forEach(eventRow);
-  if(!a){recipientRow();eventRow();}$("keyBox").classList.add("hide");
+  if(!a){recipientRow();eventRow({id:"notificacao",mode:"TEXT",text:"",active:true});$("appProvider").value="WAPI";}
+  $("keyBox").classList.add("hide");$("instanceId").value="";$("instanceToken").value="";
+  $("providerBox").classList.toggle("hide",!a||a.provider!=="WAPI");
+  $("sendCard").classList.toggle("hide",!a);$("integrationCard").classList.toggle("hide",!a);
+  if(a){renderSend(a);renderIntegration(a);if(a.provider==="WAPI")loadProvider(a.id);}
+  $("ownProvider").open=false;
   $("keyState").textContent=a?.hasKey?"Chave ativa":"Sem chave";renderApps();hideNotice();
 }
 function collect(){
@@ -171,11 +176,105 @@ function collect(){
   if(!/^[a-z][a-z0-9_-]{1,39}$/.test(id))throw Error("Código inválido. Use minúsculas e hífen, com pelo menos 2 caracteres");
   return {id,name,provider:$("appProvider").value,brand:$("appBrand").value,active:$("appActive").checked,recipients,events};
 }
+
+function renderSend(app){
+  const events=app.events.filter(e=>e.active&&e.mode==="TEXT");
+  $("sendEvent").innerHTML=events.map(e=>'<option value="'+escape(e.id)+'">'+escape(e.id)+'</option>').join("");
+  const contacts=app.recipients.filter(r=>r.active);
+  $("sendRecipients").innerHTML=contacts.map(r=>'<label><input type="checkbox" value="'+escape(r.phone)+'" checked>'+escape(r.name)+' (••'+escape(r.phone.slice(-4))+')</label>').join("");
+  $("sendMessage").value="";$("selectAll").textContent="Desmarcar todos";
+  $("sendNow").disabled=!events.length||!contacts.length;
+}
+function renderIntegration(app){
+  $("apiEndpoint").value=base+"/v1/send";
+  $("integrationEvent").innerHTML=app.events.map(e=>'<option value="'+escape(e.id)+'">'+escape(e.id)+'</option>').join("");
+  refreshIntegrationExample(app);
+}
+function refreshIntegrationExample(app){
+  const event=$("integrationEvent").value||app.events[0]?.id||"notificacao";
+  const body=JSON.stringify({app:app.id,event,message:"Mensagem automática gerada pelo seu sistema",reference:"ID-unico-do-evento"},null,2);
+  $("integrationExample").value="POST "+base+"/v1/send\nAuthorization: Bearer <CHAVE_DA_APLICACAO>\nContent-Type: application/json\n\n"+body;
+}
+$("integrationEvent").onchange=()=>{const app=apps.find(a=>a.id===current);if(app)refreshIntegrationExample(app);};
+$("copyExample").onclick=async()=>{
+  try{await navigator.clipboard.writeText($("integrationExample").value);
+  notice("Exemplo copiado. Guarde a chave somente no backend da aplicação.");}
+  catch{notice("Cópia automática indisponível. Selecione e copie o texto.",true);}
+};
+async function loadProvider(id){
+  $("providerStatus").textContent="Verificando";
+  try{
+    const p=await call("/admin/apps/"+id+"/provider");if(current!==id)return;
+    $("providerStatus").textContent=p.configured?"Configurado":"Pendente";
+    $("providerInfo").textContent=p.source==="app"
+      ?"Esta aplicação utiliza uma instância W-API própria, protegida no servidor."
+      :p.source==="global"?"Utilizando o número W-API já conectado na Central AUVRIUN."
+      :"Nenhuma instância configurada. Cadastre uma conexão abaixo.";
+  }catch(e){
+    if(current===id){$("providerStatus").textContent="Atualizar Worker";
+    $("providerInfo").textContent="Publique o worker.js mais recente no Cloudflare para usar este recurso.";}
+  }
+}
+$("appProvider").addEventListener("change",()=>{
+  $("providerBox").classList.toggle("hide",$("appProvider").value!=="WAPI");
+  if($("appProvider").value==="WAPI"&&current)loadProvider(current);
+});
+$("saveProvider").onclick=async()=>{
+  try{
+    if(!current)throw Error("Salve a aplicação antes");
+    const instanceId=$("instanceId").value.trim(),token=$("instanceToken").value.trim();
+    if(!instanceId||!token)throw Error("Informe o ID e o Token de Acesso da W-API");
+    await call("/admin/apps/"+current+"/provider",{method:"PUT",body:JSON.stringify({instanceId,token})});
+    $("instanceId").value="";$("instanceToken").value="";
+    await loadProvider(current);$("ownProvider").open=false;
+    notice("Nova instância W-API configurada e criptografada no servidor. Sem novos Secrets Cloudflare.");
+  }catch(e){notice(e.message,true);}
+};
+$("useGlobal").onclick=async()=>{
+  try{
+    if(!current)throw Error("Selecione uma aplicação");
+    if(!confirm("Usar o WhatsApp compartilhado da Central AUVRIUN?"))return;
+    await call("/admin/apps/"+current+"/provider",{method:"DELETE"});
+    $("instanceId").value="";$("instanceToken").value="";
+    await loadProvider(current);$("ownProvider").open=false;
+    notice("Agora esta aplicação utiliza o número W-API compartilhado.");
+  }catch(e){notice(e.message,true);}
+};
+$("selectAll").onclick=()=>{
+  const boxes=[...document.querySelectorAll("#sendRecipients input[type=checkbox]")];
+  const enable=!boxes.every(x=>x.checked);boxes.forEach(x=>x.checked=enable);
+  $("selectAll").textContent=enable?"Desmarcar todos":"Selecionar todos";
+};
+$("sendNow").onclick=async()=>{
+  try{
+    const app=apps.find(x=>x.id===current);if(!app)throw Error("Selecione uma aplicação");
+    const event=$("sendEvent").value,message=$("sendMessage").value.trim();
+    const only=[...document.querySelectorAll("#sendRecipients input:checked")].map(x=>x.value);
+    if(!event)throw Error("Cadastre um evento ativo no modo Texto");
+    if(!message)throw Error("Digite o texto da mensagem");
+    if(!only.length)throw Error("Selecione ao menos um destinatário");
+    if(!confirm("Enviar esta mensagem para "+only.length+" número(s) pelo provedor "+app.provider+"?"))return;
+    $("sendNow").disabled=true;
+    try{
+      const d=await call("/admin/apps/"+app.id+"/test",{method:"POST",body:JSON.stringify({event,message,only})});
+      notice("Mensagem enviada à API: "+d.accepted+"/"+d.requested+" aceitas. Confirme o recebimento nos celulares.");
+    }finally{$("sendNow").disabled=false;}
+  }catch(e){notice(e.message,true);}
+};
+
 $("addApp").onclick=()=>edit(null);$("addRecipient").onclick=()=>recipientRow();
 $("addEvent").onclick=()=>eventRow();
-$("save").onclick=async()=>{try{const app=collect();await call("/admin/apps/"+app.id,{method:"PUT",body:JSON.stringify(app)});
-    current=app.id;await reload();edit(apps.find(a=>a.id===app.id));notice("Aplicação salva. Gere uma chave para autorizar os envios.");}
-  catch(e){notice(e.message,true);}};
+$("save").onclick=async()=>{try{
+  const app=collect(),isNew=!apps.some(a=>a.id===app.id);
+  await call("/admin/apps/"+app.id,{method:"PUT",body:JSON.stringify(app)});
+  current=app.id;await reload();edit(apps.find(a=>a.id===app.id));
+  if(isNew){
+    const result=await call("/admin/apps/"+app.id+"/key",{method:"POST"});
+    $("newKey").textContent=result.key;$("keyBox").classList.remove("hide");
+    $("keyState").textContent="Chave ativa";await reload();
+    notice("Aplicação criada! Chave de integração gerada automaticamente. Copie e guarde antes de sair.");
+  }else notice("Aplicação salva! Destinatários, eventos e provedor já valem para os próximos envios.");
+  }catch(e){notice(e.message,true);}};
 $("rotate").onclick=async()=>{try{const id=$("appId").value.trim();if(!apps.some(a=>a.id===id))throw Error("Salve a aplicação antes de gerar uma chave.");
   if(!confirm("Gerar uma nova chave invalida a anterior imediatamente. Continuar?"))return;
   const data=await call("/admin/apps/"+id+"/key",{method:"POST"});
@@ -190,7 +289,7 @@ $("test").onclick=async()=>{try{const id=$("appId").value.trim(),a=apps.find(x=>
   if(!confirm("Enviar um TESTE de "+event.id+" para TODOS os "+recipients.length+" destinatário(s) ativos?"))return;
   const data=await call("/admin/apps/"+id+"/test",{method:"POST",body:JSON.stringify({
     event:event.id,message:(a.brand==="CONSULTORIARF"?"CONSULTORIA RF":"AUVRIUN")+" | Teste de envio WhatsApp ("+id+")"})});
-  notice("Teste: "+data.accepted+"/"+data.requested+" aceite(s) pela Omni. Aceite não significa entrega.");}
+  notice("Teste: "+data.accepted+"/"+data.requested+" aceite(s) pelo provedor. Aceite não significa entrega.");}
   catch(e){notice(e.message,true);}};
 $("refresh").onclick=async()=>{try{await reload();notice("Lista atualizada.");}catch(e){notice(e.message,true);}};
 $("historyButton").onclick=async()=>{try{const d=await call("/admin/history");
