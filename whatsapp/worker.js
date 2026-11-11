@@ -43,6 +43,56 @@ async function appRead(env,id) {
   const raw=await env.AUVRIUN_KV.get("app:"+id);
   return raw?JSON.parse(raw):null;
 }
+
+/* Credenciais de instâncias adicionais, cadastradas no painel. Criptografia AES-GCM
+   com chave derivada do Secret administrativo preexistente no Worker.
+   Não alterar AUVRIUN_ADMIN_KEY sem migrar os registros criptografados. */
+async function vaultKey(env){
+  const secret=String(env.AUVRIUN_ADMIN_KEY||"");
+  if(secret.length<32)throw Error("Configure AUVRIUN_ADMIN_KEY");
+  const base=await crypto.subtle.importKey("raw",TXT.encode(secret),"HKDF",false,["deriveKey"]);
+  return crypto.subtle.deriveKey({
+    name:"HKDF",hash:"SHA-256",salt:TXT.encode("auvriun-whatsapp-vault-v1"),
+    info:TXT.encode("wapi-credentials")
+  },base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+}
+function bytesBase64(bytes){
+  let raw="";for(const byte of bytes)raw+=String.fromCharCode(byte);
+  return btoa(raw);
+}
+function base64Bytes(value){
+  return Uint8Array.from(atob(value),x=>x.charCodeAt(0));
+}
+async function encryptCredentials(env,instanceId,token){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const data=TXT.encode(JSON.stringify({instanceId,token}));
+  const encrypted=await crypto.subtle.encrypt({name:"AES-GCM",iv},await vaultKey(env),data);
+  return JSON.stringify({v:1,iv:bytesBase64(iv),data:bytesBase64(new Uint8Array(encrypted))});
+}
+async function decryptCredentials(env,encrypted){
+  const x=JSON.parse(encrypted);
+  if(x.v!==1)throw Error("Formato de credenciais desconhecido");
+  const bytes=await crypto.subtle.decrypt({name:"AES-GCM",iv:base64Bytes(x.iv)},
+    await vaultKey(env),base64Bytes(x.data));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+function safeInstanceId(input){
+  const value=String(input||"").trim();
+  if(!/^[A-Za-z0-9_-]{6,100}$/.test(value))throw Error("ID da instância W-API inválido");
+  return value;
+}
+async function providerCredentials(env,app){
+  if(app.provider!=="WAPI")return {provider:"OMNI"};
+  const encrypted=await env.AUVRIUN_KV.get("provider:wapi:"+app.id);
+  if(encrypted){
+    const decoded=await decryptCredentials(env,encrypted);
+    return {provider:"WAPI",instanceId:safeInstanceId(decoded.instanceId),token:decoded.token,source:"app"};
+  }
+  const instanceId=String(env.WAPI_INSTANCE_ID||"").trim(),token=String(env.WAPI_TOKEN||"").trim();
+  if(!instanceId||!token)throw Error("Configure a W-API no painel da aplicação ou Secrets globais");
+  return {provider:"WAPI",instanceId:safeInstanceId(instanceId),token,source:"global"};
+}
+
 function validateApp(id,input,previous) {
   if(!validSlug(id))throw new Error("Código da aplicação inválido: minúsculas, números e hífen");
   if(!input||typeof input!=="object"||Array.isArray(input))throw new Error("Aplicação inválida");
@@ -101,7 +151,7 @@ function interpolate(obj, vars) {
 function historyKey(){
   return "hist:"+String(9999999999999-Date.now()).padStart(13,"0")+":"+crypto.randomUUID();
 }
-async function sendOne(env,app,event,recipient,content,reference,origin) {
+async function sendOne(env,app,event,recipient,content,reference,origin,providerConfig) {
   const key=historyKey(),started=new Date().toISOString();
   const record={id:key,app:app.id,event:event.id,reference:limitText(reference,100),
     recipient:recipient.name,phoneFinal:recipient.phone.slice(-4),provider:app.provider||"OMNI",createdAt:started,
@@ -112,10 +162,9 @@ async function sendOne(env,app,event,recipient,content,reference,origin) {
     let response;
     try {
       if(app.provider==="WAPI"){
-        const instance=String(env.WAPI_INSTANCE_ID).trim();
-        response=await fetch("https://api.w-api.app/v1/message/send-text?instanceId="+encodeURIComponent(instance),{
+        response=await fetch("https://api.w-api.app/v1/message/send-text?instanceId="+encodeURIComponent(providerConfig.instanceId),{
           method:"POST",headers:{"content-type":"application/json",
-            "authorization":"Bearer "+env.WAPI_TOKEN},
+            "authorization":"Bearer "+providerConfig.token},
           body:JSON.stringify({phone:recipient.phone,message:content.body.message}),
           signal:controller.signal
         });
@@ -163,8 +212,6 @@ async function dispatch(env,app,payload) {
   const event=app.events.find(e=>e.id===payload.event&&e.active);
   if(!event)throw new Error("Evento não autorizado para a aplicação");
   if(app.provider==="WAPI"){
-    if(!env.WAPI_TOKEN || !env.WAPI_INSTANCE_ID)throw new Error("Configure WAPI_TOKEN e WAPI_INSTANCE_ID nos Secrets Cloudflare");
-    if(!/^[A-Za-z0-9_-]{6,100}$/.test(String(env.WAPI_INSTANCE_ID).trim()))throw new Error("ID da instância W-API inválido");
     if(event.mode!=="TEXT")throw new Error("A W-API requer evento do tipo Texto");
   }else if(!env.OMNI_SECRET_KEY || !env.OMNI_CHANNEL_ID){
     throw new Error("Configure OMNI_SECRET_KEY e OMNI_CHANNEL_ID");
@@ -193,7 +240,8 @@ async function dispatch(env,app,payload) {
     if(!text)throw new Error("Informe message ou texto padrão do evento");
     content={type:"TEXT",body:{message:text}};
   }
-  const results=await Promise.all(selected.map(r=>sendOne(env,app,event,r,content,payload.reference,"")));
+  const providerConfig=await providerCredentials(env,app);
+  const results=await Promise.all(selected.map(r=>sendOne(env,app,event,r,content,payload.reference,"",providerConfig)));
   const accepted=results.filter(r=>r.status==="ACCEPTED").length;
   const firstFailure=results.find(r=>r.status!=="ACCEPTED");
   return {ok:accepted>0,app:app.id,event:event.id,
@@ -257,7 +305,7 @@ export default {
     if(req.method==="OPTIONS"){
       if(!ORIGINS.has(origin))return fail("Origem não autorizada",403,origin);
       return new Response(null,{status:204,headers:{"access-control-allow-origin":origin,
-        "access-control-allow-methods":"GET, POST, PUT, OPTIONS",
+        "access-control-allow-methods":"GET, POST, PUT, DELETE, OPTIONS",
         "access-control-allow-headers":"Content-Type, Authorization, X-AUVRIUN-ADMIN-KEY",
         "access-control-max-age":"600","vary":"Origin"}});
     }
@@ -280,6 +328,31 @@ export default {
           const rows=(await Promise.all(listed.keys.map(k=>env.AUVRIUN_KV.get(k.name)))).filter(Boolean).map(x=>JSON.parse(x));
           const only=u.searchParams.get("app");
           return json({ok:true,history:rows.filter(r=>!only||r.app===only).slice(0,100)},200,origin);
+        }
+        const providerRoute=path.match(/^\/admin\/apps\/([a-z][a-z0-9_-]{1,39})\/provider$/);
+        if(providerRoute){
+          const id=providerRoute[1],existing=await appRead(env,id);
+          if(!existing)return fail("Aplicação não encontrada",404,origin);
+          if(req.method==="GET"){
+            const stored=await env.AUVRIUN_KV.get("provider:wapi:"+id);
+            return json({ok:true,source:stored?"app":env.WAPI_TOKEN&&env.WAPI_INSTANCE_ID?"global":"none",
+              configured:!!stored||!!(env.WAPI_TOKEN&&env.WAPI_INSTANCE_ID),
+              instanceId:stored?"(instância própria)":env.WAPI_INSTANCE_ID||""},200,origin);
+          }
+          if(req.method==="PUT"){
+            const data=await readJson(req);
+            const instanceId=safeInstanceId(data.instanceId);
+            const token=String(data.token||"").trim();
+            if(token.length<16||token.length>1000)throw Error("Token W-API inválido: informe o Token de Acesso da instância");
+            const sealed=await encryptCredentials(env,instanceId,token);
+            await env.AUVRIUN_KV.put("provider:wapi:"+id,sealed);
+            return json({ok:true,configured:true,source:"app",instanceId:"(instância própria)"},200,origin);
+          }
+          if(req.method==="DELETE"){
+            await env.AUVRIUN_KV.delete("provider:wapi:"+id);
+            return json({ok:true,configured:!!(env.WAPI_TOKEN&&env.WAPI_INSTANCE_ID),
+              source:env.WAPI_TOKEN&&env.WAPI_INSTANCE_ID?"global":"none"},200,origin);
+          }
         }
         const m=path.match(/^\/admin\/apps\/([a-z][a-z0-9_-]{1,39})(?:\/(key|test))?$/);
         if(m){
