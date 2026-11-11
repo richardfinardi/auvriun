@@ -57,6 +57,19 @@ summary{cursor:pointer;font-weight:650;color:#b7d7ff}
 <div id="apps"></div><p class="small" id="configState"></p></div>
 <div class="card"><h2>Operação</h2><div id="stats" class="muted small">Carregando...</div>
 <div class="actions"><button class="secondary" id="refresh">Atualizar</button><button class="secondary" id="historyButton">Histórico</button></div></div>
+<div class="card" id="monitorPstec">
+<div class="eyebrow">Teste de automação</div><h2 style="margin-top:8px">PSTEC: Nova OC a pagar</h2>
+<p class="small">Consulta as OCs do CPS e confirma saldo a pagar nos títulos financeiros. Alertas de OCs antigas são bloqueados na primeira sincronização.</p>
+<div id="pstecMonitorState" class="muted small">Monitor ainda não consultado.</div>
+<div class="actions">
+<button id="pstecMonitorSetup" class="secondary">1. Criar regra</button>
+<button id="pstecMonitorBaseline" class="secondary">2. Sincronizar sem enviar</button>
+<button id="pstecMonitorPreview" class="secondary">Prévia das novas OCs</button>
+<button id="pstecMonitorToggle" class="secondary">Ativar monitor</button>
+<button id="pstecMonitorCheck" class="secondary">Verificar agora</button>
+</div>
+<p class="small">O monitor só envia quando uma OC emitida após a sincronização inicial tiver título com saldo positivo. O agendamento periódico usa um único Cron Trigger da central.</p>
+</div>
 </aside><div>
 <div class="card hide" id="editor">
 <div class="row" style="justify-content:space-between"><h2>Configuração da aplicação</h2><span class="pill" id="keyState">Sem chave</span></div>
@@ -127,7 +140,7 @@ async function call(path,opts={}){
 function validateBase(){const u=new URL($("base").value.trim());if(u.protocol!=="https:")throw Error("Use HTTPS");return u.toString().replace(/\/$/,"");}
 $("doConnect").onclick=async()=>{
   try{base=validateBase();admin=$("secret").value.trim();if(admin.length<32)throw Error("Informe a chave administrativa (mínimo 32 caracteres)");
-    await reload();$("login").classList.add("hide");$("system").classList.remove("hide");$("secret").value="";hideNotice();
+    await reload();$("login").classList.add("hide");$("system").classList.remove("hide");$("secret").value="";hideNotice(); await loadPstecMonitor();
   }catch(e){notice(e.message,true);}
 };
 async function reload(){const [a,h]=await Promise.all([call("/admin/apps"),fetch(base+"/health").then(r=>r.json())]);apps=a.apps||[];renderApps();
@@ -176,6 +189,69 @@ function collect(){
   if(!/^[a-z][a-z0-9_-]{1,39}$/.test(id))throw Error("Código inválido. Use minúsculas e hífen, com pelo menos 2 caracteres");
   return {id,name,provider:$("appProvider").value,brand:$("appBrand").value,active:$("appActive").checked,recipients,events};
 }
+
+
+let pstecMonitor=null;
+async function loadPstecMonitor(){
+  const data=await call("/admin/monitors/pstec-oc");
+  pstecMonitor=data;
+  const status=[];
+  status.push(data.configured?"Regra criada":"Regra não criada");
+  status.push(data.initialized?"Estado inicial registrado: "+data.registered+" OC(s)":"Sem sincronização inicial");
+  status.push(data.enabled?"Monitor ATIVO":"Monitor DESATIVADO");
+  if(data.lastRun)status.push("Última verificação: "+new Date(data.lastRun).toLocaleString("pt-BR"));
+  const r=data.lastResult;
+  if(r)status.push("OCs lidas: "+r.found+" | Novas: "+r.newOrders+" | Pagamento confirmado: "+r.eligible+
+    " | Alertas aceitos: "+r.notified+(r.errors?.length?" | Falhas: "+r.errors.join("; "):""));
+  $("pstecMonitorState").textContent=status.join("\n");
+  $("pstecMonitorState").style.whiteSpace="pre-line";
+  $("pstecMonitorSetup").disabled=data.configured;
+  $("pstecMonitorBaseline").disabled=!data.configured||data.initialized;
+  $("pstecMonitorPreview").disabled=!data.initialized;
+  $("pstecMonitorCheck").disabled=!data.initialized||!data.enabled;
+  $("pstecMonitorToggle").disabled=!data.initialized;
+  $("pstecMonitorToggle").textContent=data.enabled?"Desativar monitor":"Ativar monitor";
+}
+async function monitorPstecAction(action){
+  const response=await call("/admin/monitors/pstec-oc",{
+    method:"POST",body:JSON.stringify({action})
+  });
+  await loadPstecMonitor();
+  const summary=response.message||("OCs: "+(response.found||0)+
+    " | Novas: "+(response.newOrders||0)+" | Elegíveis: "+(response.eligible||0)+
+    " | Envios aceitos: "+(response.notified||0));
+  notice(summary+(response.errors?.length?"\nFalhas: "+response.errors.join("; "):""));
+  return response;
+}
+$("pstecMonitorSetup").onclick=async()=>{
+  try{
+    await monitorPstecAction("setup");await reload();
+    notice("Regra PSTEC criada. Selecione a aplicação PSTEC, cadastre destinatários e salve. Em seguida faça a sincronização inicial, sem envio.");
+  }catch(e){notice(e.message,true);}
+};
+$("pstecMonitorBaseline").onclick=async()=>{
+  if(!confirm("Registrar todas as OCs atuais como antigas? Nenhuma mensagem será enviada nesta etapa."))return;
+  try{await monitorPstecAction("baseline");}catch(e){notice(e.message,true);}
+};
+$("pstecMonitorPreview").onclick=async()=>{
+  try{
+    const r=await monitorPstecAction("preview");
+    if(r.examples?.length)notice("Prévia (sem enviar):\n"+
+      r.examples.map(x=>"OC "+x.oc+" / empresa "+x.empresa+" / "+x.fornecedor+" / saldo R$ "+x.saldo).join("\n"));
+    else notice("Nenhuma OC nova com título a pagar identificada desde a sincronização inicial. Não foram enviadas mensagens.");
+  }catch(e){notice(e.message,true);}
+};
+$("pstecMonitorToggle").onclick=async()=>{
+  try{
+    const action=pstecMonitor?.enabled?"disable":"enable";
+    if(action==="enable"&&!confirm("Ativar os alertas da PSTEC para os destinatários cadastrados? As OCs anteriores à sincronização inicial não serão notificadas."))return;
+    await monitorPstecAction(action);
+  }catch(e){notice(e.message,true);}
+};
+$("pstecMonitorCheck").onclick=async()=>{
+  if(!confirm("Consultar o CPS agora e enviar WhatsApp para cada nova OC com saldo a pagar?"))return;
+  try{await monitorPstecAction("check");}catch(e){notice(e.message,true);}
+};
 
 function renderSend(app){
   const events=app.events.filter(e=>e.active&&e.mode==="TEXT");
