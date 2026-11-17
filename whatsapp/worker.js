@@ -2,7 +2,7 @@
    Credenciais SOMENTE em Secrets Cloudflare. Nunca colocar tokens no GitHub ou em páginas. */
 const PREFIX = "/whatsapp";
 const API = "https://api.omni.z-api.io/v1/channels/";
-const ORIGINS = new Set(["https://auvriun.com", "https://www.auvriun.com"]);
+const ORIGINS = new Set(["https://auvriun.com", "https://www.auvriun.com", "https://consultoriarf.net", "https://www.consultoriarf.net"]);
 const TXT = new TextEncoder();
 const MAX_HISTORY_AGE = 60 * 24 * 3600;
 
@@ -302,12 +302,13 @@ async function wapiOptin(env,app,p){
  return await sendOne(env,app,{id:"confirmacao_assinatura"}, {name:"Verificação",phone:p.phone},content,
   "verificacao-whatsapp","",cfg);
 }
-async function selfSubscriptionRoute(req,env,path,origin,u){
+async function selfSubscriptionRoute(req,env,path,origin,u,trusted=null){
  // Chamadas somente do backend autenticado: nunca do JS público do portal.
  const isList=req.method==="GET"&&path==="/v1/subscriptions";
  const isGet=req.method==="GET"&&path==="/v1/subscription";
  const input=req.method==="GET"?{app:u.searchParams.get("app"),user:u.searchParams.get("user")}:await readJson(req);
- const app=await appCredential(req,env,input);
+ if(trusted){input.app=trusted.app.id;input.user=trusted.user;}
+ const app=trusted?trusted.app:await appCredential(req,env,input);
  if(isList){
   const prefix=SELF_SUB_PREFIX+app.id+":";
   let cursor,items=[],round=0;
@@ -801,6 +802,34 @@ export default {
         }
         return fail("Rota administrativa não encontrada",404,origin);
       }catch(e){return fail(limitText(e?.message||e,200),400,origin);}
+    }
+    // Autoinscricao do portal Columbia: autentica diretamente no /portal/me.
+    // NUNCA aceita identidade/telefone como autorizacao enviada pelo navegador.
+    if(path.startsWith("/v1/columbia/subscription")){
+      const suffix=path.slice("/v1/columbia".length);
+      if(!["/v1/subscription","/v1/subscription/start","/v1/subscription/confirm"].includes(suffix))
+        return fail("Rota de assinatura desconhecida",404,origin);
+      if(!(req.method==="GET"&&suffix==="/v1/subscription") &&
+         !(req.method==="POST"&&suffix.endsWith("/start")) &&
+         !(req.method==="POST"&&suffix.endsWith("/confirm")) &&
+         !(req.method==="PUT"&&suffix==="/v1/subscription") &&
+         !(req.method==="DELETE"&&suffix==="/v1/subscription"))
+        return fail("Método não permitido",405,origin);
+      const bearer=(req.headers.get("authorization")||"").match(/^Bearer (.{20,4096})$/);
+      if(!bearer)return fail("Entre no portal Columbia",401,origin);
+      try{
+        const verify=await fetch("https://columbia.consultoriarf.net/producao/portal/me",{
+          method:"GET",headers:{"authorization":"Bearer "+bearer[1],"accept":"application/json"},
+          signal:AbortSignal.timeout(10000),cache:"no-store"
+        });
+        if(!verify.ok)return fail("Sessão Columbia inválida ou expirada",401,origin);
+        const user=await verify.json();
+        if(Number(user?.u_horas??user?.U_HORAS??0)!==1 || !String(user?.usuario||"").trim())
+          return fail("Usuário sem acesso ao Fechamento de Horas",403,origin);
+        const app=await appRead(env,"columbia");
+        if(!app?.active||app.provider!=="WAPI")return fail("AUVRIUN: configure aplicação columbia com W-API",503,origin);
+        return await selfSubscriptionRoute(req,env,suffix,origin,u,{app,user:String(user.usuario).trim()});
+      }catch(e){return fail(limitText(e?.message||e,200),400,origin)}
     }
     if(path==="/v1/subscriptions"||path==="/v1/subscription"||
        path==="/v1/subscription/start"||path==="/v1/subscription/confirm"||
