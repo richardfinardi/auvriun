@@ -806,7 +806,7 @@ export default {
     // Autoinscricao do portal Columbia: autentica diretamente no /portal/me.
     // NUNCA aceita identidade/telefone como autorizacao enviada pelo navegador.
     if(path.startsWith("/v1/columbia/subscription")){
-      const suffix=path.slice("/v1/columbia".length);
+      const suffix="/v1"+path.slice("/v1/columbia".length);
       if(!["/v1/subscription","/v1/subscription/start","/v1/subscription/confirm"].includes(suffix))
         return fail("Rota de assinatura desconhecida",404,origin);
       if(!(req.method==="GET"&&suffix==="/v1/subscription") &&
