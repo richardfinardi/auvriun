@@ -401,13 +401,19 @@ async function selfSubscriptionRoute(req,env,path,origin,u,trusted=null){
    const items=scopes[field]||[];
    return field[0].toUpperCase()+field.slice(1)+": "+(items.length?items.length+" selecionado(s)":"Todos");
   }).join("\n");
-  const message="*COLUMBIA MACHINE | TESTE WHATSAPP*\n\n"+
+  const defaultMessage="*COLUMBIA MACHINE | TESTE WHATSAPP*\n\n"+
     "Seu número foi confirmado e a integração com a AUVRIUN está funcionando.\n\n"+
     "*Conteúdo:* "+types+"\n"+
     "*Periodicidade:* "+(label[selected.frequency]||"Não informada")+"\n"+
     "*Seleções:*\n"+scopeText+"\n\n"+
     "Este é apenas um teste de entrega. O agendador dos relatórios ainda precisa ser ativado.\n"+
     "_Sem anexos. Mensagens futuras terão os indicadores do período._";
+  // O usuário só consegue enviar prévias ao próprio número verificado.
+  // Nunca aceitar texto arbitrário ou mensagens extensas nesse endpoint.
+  const preview=String(input.message||"").trim();
+  if(preview&&(!preview.startsWith("*COLUMBIA MACHINE | PRÉVIA")||preview.length>3900))
+    throw Error("Formato da prévia inválido");
+  const message=preview||defaultMessage;
   const cfg=await providerCredentials(env,app);
   const result=await sendOne(env,app,event,{name:current.user,phone:current.phone},
     {type:"TEXT",body:{message}},"teste-columbia","",cfg);
