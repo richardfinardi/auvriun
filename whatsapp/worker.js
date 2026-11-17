@@ -379,6 +379,45 @@ async function selfSubscriptionRoute(req,env,path,origin,u,trusted=null){
   if(current)await env.AUVRIUN_KV.put(key,JSON.stringify({...current,active:false,updatedAt:new Date().toISOString()}));
   return json({ok:true,active:false},200,origin);
  }
+ if(path==="/v1/subscription/test"&&req.method==="POST"){
+  if(!trusted)throw Error("Envio de teste disponível apenas no portal autenticado Columbia");
+  if(!current?.active||!current.phone)throw Error("Confirme seu WhatsApp antes de enviar um teste");
+  if(app.provider!=="WAPI")throw Error("Aplicação Columbia precisa utilizar W-API");
+  const event=app.events.find(e=>e.id==="fechamento_horas"&&e.active&&e.mode==="TEXT");
+  if(!event)throw Error("Cadastre o evento fechamento_horas ativo no modo Texto");
+  const timestamp=new Date();
+  const today=timestamp.toISOString().slice(0,10);
+  const dailyKey="columbia:test:daily:"+app.id+":"+await hash(key)+":"+today;
+  const lastKey="columbia:test:last:"+app.id+":"+await hash(key);
+  const used=Number(await env.AUVRIUN_KV.get(dailyKey)||0);
+  const last=Number(await env.AUVRIUN_KV.get(lastKey)||0);
+  if(used>=5)throw Error("Limite de cinco testes por dia atingido");
+  if(Date.now()-last<60000)throw Error("Aguarde um minuto para enviar outro teste");
+  const label={diario:"Diário (segunda a sexta)",semanal:"Semanal (segunda)",mensal:"Mensal (dia 1)"};
+  const selected=current.preferences||{};
+  const types=(selected.types||[]).map(x=>x==="metas"?"Metas":"Resumo de horas").join(" + ")||"Nenhum";
+  const scopes=selected.scopes||{};
+  const scopeText=["segmentos","maquinas","funcionarios"].map(field=>{
+   const items=scopes[field]||[];
+   return field[0].toUpperCase()+field.slice(1)+": "+(items.length?items.length+" selecionado(s)":"Todos");
+  }).join("\n");
+  const message="*COLUMBIA MACHINE | TESTE WHATSAPP*\n\n"+
+    "Seu número foi confirmado e a integração com a AUVRIUN está funcionando.\n\n"+
+    "*Conteúdo:* "+types+"\n"+
+    "*Periodicidade:* "+(label[selected.frequency]||"Não informada")+"\n"+
+    "*Seleções:*\n"+scopeText+"\n\n"+
+    "Este é apenas um teste de entrega. O agendador dos relatórios ainda precisa ser ativado.\n"+
+    "_Sem anexos. Mensagens futuras terão os indicadores do período._";
+  const cfg=await providerCredentials(env,app);
+  const result=await sendOne(env,app,event,{name:current.user,phone:current.phone},
+    {type:"TEXT",body:{message}},"teste-columbia","",cfg);
+  if(result.status!=="ACCEPTED")
+   return json({ok:false,status:result.status,error:result.error||"Provedor recusou o envio"},502,origin);
+  await env.AUVRIUN_KV.put(dailyKey,String(used+1),{expirationTtl:86400});
+  await env.AUVRIUN_KV.put(lastKey,String(Date.now()),{expirationTtl:120});
+  return json({ok:true,status:"ACCEPTED",phoneFinal:current.phone.slice(-4),
+    notice:"Aceito pela W-API. Verifique o recebimento no WhatsApp."},200,origin);
+ }
  if(path==="/v1/subscription/send"&&req.method==="POST"){
   if(!current?.active||!current.phone)throw Error("Destinatário não confirmou assinatura");
   const kind=String(input.type||"");
@@ -807,11 +846,12 @@ export default {
     // NUNCA aceita identidade/telefone como autorizacao enviada pelo navegador.
     if(path.startsWith("/v1/columbia/subscription")){
       const suffix="/v1"+path.slice("/v1/columbia".length);
-      if(!["/v1/subscription","/v1/subscription/start","/v1/subscription/confirm"].includes(suffix))
+      if(!["/v1/subscription","/v1/subscription/start","/v1/subscription/confirm","/v1/subscription/test"].includes(suffix))
         return fail("Rota de assinatura desconhecida",404,origin);
       if(!(req.method==="GET"&&suffix==="/v1/subscription") &&
          !(req.method==="POST"&&suffix.endsWith("/start")) &&
          !(req.method==="POST"&&suffix.endsWith("/confirm")) &&
+         !(req.method==="POST"&&suffix==="/v1/subscription/test") &&
          !(req.method==="PUT"&&suffix==="/v1/subscription") &&
          !(req.method==="DELETE"&&suffix==="/v1/subscription"))
         return fail("Método não permitido",405,origin);
