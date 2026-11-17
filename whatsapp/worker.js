@@ -252,6 +252,155 @@ async function dispatch(env,app,payload) {
     note:"ACCEPTED significa aceite pela API, não comprova entrega no WhatsApp.",results};
 }
 
+
+/* COLUMBIA / AUTOINSCRICAO WHATSAPP
+   A chave da aplicacao SOMENTE no backend Columbia. Nao altera os destinatarios fixos.
+   O proprio funcionario confirma a posse do telefone com um codigo enviado via W-API.
+   A autenticação de usuário é responsabilidade do backend Columbia, que fornece user.
+*/
+const SELF_SUB_PREFIX="columbia:subscriber:";
+const SELF_PENDING_PREFIX="columbia:pending:";
+const SELF_OTP_WINDOW=600;
+const SELF_MAX_ATTEMPTS=5;
+async function subscriberKey(appId,user){
+ const u=String(user||"").trim().toLowerCase();
+ if(!u||u.length>120)throw Error("Identificador de usuário inválido");
+ return SELF_SUB_PREFIX+appId+":"+(await hash(u));
+}
+async function pendingKey(appId,user){return SELF_PENDING_PREFIX+(await subscriberKey(appId,user)).slice(SELF_SUB_PREFIX.length)}
+function normalizePreferences(input){
+ const validTypes=new Set(["metas","resumo"]);
+ const types=Array.isArray(input?.types)?[...new Set(input.types)]:[];
+ if(!types.length||types.length>2||types.some(t=>!validTypes.has(t)))throw Error("Selecione Metas, Resumo de horas ou ambos");
+ const frequency=String(input?.frequency||"");
+ if(!["diario","semanal","mensal"].includes(frequency))throw Error("Periodicidade inválida");
+ const source=input?.scopes||{};
+ if(!source||typeof source!=="object"||Array.isArray(source))throw Error("Filtros inválidos");
+ const scopes={};
+ for(const field of ["segmentos","maquinas","funcionarios"]){
+  const arr=source[field]??[];
+  if(!Array.isArray(arr)||arr.length>50)throw Error("Seleção muito grande para "+field);
+  const clean=arr.map(x=>String(x||"").trim()).filter(x=>x.length>0&&x.length<=120);
+  if(clean.length!==arr.length||new Set(clean).size!==arr.length)throw Error("Seleção inválida para "+field);
+  scopes[field]=clean;
+ }
+ return {types,frequency,scopes};
+}
+async function appCredential(req,env,p){
+ if(!validSlug(p?.app))throw Error("Aplicação inválida");
+ const bearer=(req.headers.get("authorization")||"").match(/^Bearer (auv_[A-Za-z0-9_-]{40,90})$/);
+ if(!bearer)throw Error("Credencial de aplicação inválida");
+ const app=await appRead(env,p.app);
+ if(!app?.active||!app.keyHash||!secureEqual(app.keyHash,await hash(bearer[1])))
+  throw Error("Credencial de aplicação inválida");
+ return app;
+}
+async function wapiOptin(env,app,p){
+ if(app.provider!=="WAPI")throw Error("Confirmação dinâmica disponível inicialmente pela W-API");
+ const cfg=await providerCredentials(env,app);
+ const content={type:"TEXT",body:{message:"COLUMBIA MACHINE | Confirmação de assinatura\n\nSeu código: *"+p.otp+"*\n\nVálido por 10 minutos. Não compartilhe este código. Se não solicitou, ignore."}};
+ return await sendOne(env,app,{id:"confirmacao_assinatura"}, {name:"Verificação",phone:p.phone},content,
+  "verificacao-whatsapp","",cfg);
+}
+async function selfSubscriptionRoute(req,env,path,origin,u){
+ // Chamadas somente do backend autenticado: nunca do JS público do portal.
+ const isList=req.method==="GET"&&path==="/v1/subscriptions";
+ const isGet=req.method==="GET"&&path==="/v1/subscription";
+ const input=req.method==="GET"?{app:u.searchParams.get("app"),user:u.searchParams.get("user")}:await readJson(req);
+ const app=await appCredential(req,env,input);
+ if(isList){
+  const prefix=SELF_SUB_PREFIX+app.id+":";
+  let cursor,items=[],round=0;
+  do{
+   const list=await env.AUVRIUN_KV.list({prefix,limit:100,...(cursor?{cursor}:{})});
+   const vals=await Promise.all(list.keys.map(k=>env.AUVRIUN_KV.get(k.name,"json")));
+   items.push(...vals.filter(v=>v?.active===true));
+   cursor=list.list_complete?null:list.cursor;
+  }while(cursor&&++round<10);
+  return json({ok:true,subscriptions:items},200,origin);
+ }
+ const key=await subscriberKey(app.id,input.user);
+ const current=await env.AUVRIUN_KV.get(key,"json");
+ if(isGet){
+  if(!current)return json({ok:true,subscription:null},200,origin);
+  const {phone:fullPhone,...safe}=current;
+  return json({ok:true,subscription:{...safe,phoneFinal:fullPhone?.slice(-4)||""}},200,origin);
+ }
+ if(path==="/v1/subscription/start"&&req.method==="POST"){
+  const number=phone(input.phone);
+  if(!number||!number.startsWith("55")||number.length<12||number.length>13)
+   throw Error("Informe o número WhatsApp brasileiro com DDI 55 e DDD");
+  const preferences=normalizePreferences(input);
+  const pending=await pendingKey(app.id,input.user);
+  const previous=await env.AUVRIUN_KV.get(pending,"json");
+  const now=Date.now();
+  if(previous?.createdMs&&now-previous.createdMs<60000)
+   throw Error("Aguarde 60 segundos antes de solicitar outro código");
+  const limitKey="columbia:otp-limit:"+app.id+":"+await hash(number)+":"+new Date().toISOString().slice(0,10);
+  const counter=Number(await env.AUVRIUN_KV.get(limitKey)||0);
+  if(counter>=5)throw Error("Limite diário de verificações deste número atingido");
+  await env.AUVRIUN_KV.put(limitKey,String(counter+1),{expirationTtl:86400});
+  const bytes=crypto.getRandomValues(new Uint32Array(1));
+  const otp=String(100000+bytes[0]%900000),salt=crypto.randomUUID();
+  const status=await wapiOptin(env,app,{otp,phone:number});
+  if(status.status!=="ACCEPTED")throw Error("Não foi possível enviar o código: "+(status.error||status.status));
+  await env.AUVRIUN_KV.put(pending,JSON.stringify({
+   phone:number,user:String(input.user),preferences,createdMs:now,hash:await hash(salt+otp),salt,attempts:0
+  }),{expirationTtl:SELF_OTP_WINDOW});
+  return json({ok:true,verification:"sent",phoneFinal:number.slice(-4),expiresMinutes:10},200,origin);
+ }
+ if(path==="/v1/subscription/confirm"&&req.method==="POST"){
+  const otp=String(input.code||"").trim();
+  if(!/^\d{6}$/.test(otp))throw Error("Código de seis dígitos inválido");
+  const pending=await pendingKey(app.id,input.user);
+  const p=await env.AUVRIUN_KV.get(pending,"json");
+  if(!p||Date.now()-p.createdMs>SELF_OTP_WINDOW*1000)throw Error("Código expirado, solicite novamente");
+  if(p.attempts>=SELF_MAX_ATTEMPTS)throw Error("Limite de tentativas excedido");
+  if(!secureEqual(p.hash,await hash(p.salt+otp))){
+   p.attempts++;
+   if(p.attempts>=SELF_MAX_ATTEMPTS)await env.AUVRIUN_KV.delete(pending);
+   else await env.AUVRIUN_KV.put(pending,JSON.stringify(p),{expirationTtl:SELF_OTP_WINDOW});
+   throw Error("Código incorreto");
+  }
+  const subscription={app:app.id,user:p.user,phone:p.phone,active:true,consentedAt:new Date().toISOString(),
+   preferences:p.preferences,updatedAt:new Date().toISOString()};
+  await env.AUVRIUN_KV.put(key,JSON.stringify(subscription));
+  await env.AUVRIUN_KV.delete(pending);
+  return json({ok:true,active:true,phoneFinal:p.phone.slice(-4)},200,origin);
+ }
+ if(path==="/v1/subscription"&&req.method==="PUT"){
+  if(!current?.active)throw Error("Não há assinatura confirmada");
+  const preferences=normalizePreferences(input);
+  await env.AUVRIUN_KV.put(key,JSON.stringify({...current,preferences,updatedAt:new Date().toISOString()}));
+  return json({ok:true,active:true},200,origin);
+ }
+ if(path==="/v1/subscription"&&req.method==="DELETE"){
+  if(current)await env.AUVRIUN_KV.put(key,JSON.stringify({...current,active:false,updatedAt:new Date().toISOString()}));
+  return json({ok:true,active:false},200,origin);
+ }
+ if(path==="/v1/subscription/send"&&req.method==="POST"){
+  if(!current?.active||!current.phone)throw Error("Destinatário não confirmou assinatura");
+  const kind=String(input.type||"");
+  if(!current.preferences?.types?.includes(kind))throw Error("Tipo de relatório não autorizado pela assinatura");
+  const event=app.events.find(e=>e.id===String(input.event||"fechamento_horas")&&e.active);
+  if(!event||event.mode!=="TEXT")throw Error("Cadastre o evento fechamento_horas ativo no modo Texto");
+  if(app.provider!=="WAPI")throw Error("Assinatura dinâmica requer aplicação W-API");
+  const message=String(input.message||"").trim();
+  if(!message||message.length>4000)throw Error("Texto do relatório vazio ou muito longo");
+  const reference=limitText(input.reference||"",100);
+  if(!reference)throw Error("Referência de período obrigatória");
+  const uniq="columbia:send:"+app.id+":"+await hash(key+"|"+reference+"|"+kind);
+  if(await env.AUVRIUN_KV.get(uniq))return json({ok:true,duplicate:true},200,origin);
+  const cfg=await providerCredentials(env,app);
+  const result=await sendOne(env,app,event,{name:current.user,phone:current.phone},
+    {type:"TEXT",body:{message}} ,reference,"",cfg);
+  if(result.status==="ACCEPTED")await env.AUVRIUN_KV.put(uniq,"1",{expirationTtl:86400*35});
+  return json({ok:result.status==="ACCEPTED",status:result.status,error:result.error||null},
+    result.status==="ACCEPTED"?200:502,origin);
+ }
+ return fail("Operação de assinatura não encontrada",404,origin);
+}
+
 /* PSTEC / NOVA OC COM TITULO A PAGAR
    Fontes validadas no repo PSTEC: 03_compras_ocs (vinculadas a OS ativas)
    e 05_compras_financeiro (valores de titulos). Nao presumir pagamento a partir
@@ -652,6 +801,13 @@ export default {
         }
         return fail("Rota administrativa não encontrada",404,origin);
       }catch(e){return fail(limitText(e?.message||e,200),400,origin);}
+    }
+    if(path==="/v1/subscriptions"||path==="/v1/subscription"||
+       path==="/v1/subscription/start"||path==="/v1/subscription/confirm"||
+       path==="/v1/subscription/send"){
+      try{return await selfSubscriptionRoute(req,env,path,origin,u);}
+      catch(e){const msg=limitText(e?.message||e,220);
+       return fail(msg,/Credencial/.test(msg)?401:400,origin);}
     }
     if(path==="/v1/send"&&req.method==="POST"){
       try{
