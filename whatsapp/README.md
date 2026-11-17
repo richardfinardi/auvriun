@@ -138,3 +138,24 @@ O painel oferece agora **Provedor de envio**: `Z-API Omni` (padrão, mantém pro
 Endpoint oficial documentado pelo fornecedor W-API: `POST https://api.w-api.app/v1/message/send-text?instanceId=ID`, header `Authorization: Bearer TOKEN`, JSON `{ "phone": "55...", "message": "..." }`.
 
 A W-API declara expressamente que **não é API oficial da Meta**; pode existir risco de bloqueio do número, indisponibilidade e desconexão. Não use o número principal da empresa para testar. Não há necessidade de templates oficiais nessa integração, mas não há garantia de entrega. A versão atual não implementa webhook de confirmação da W-API, apenas o registro da resposta de envio.
+
+
+## Columbia: autoinscrição do próprio WhatsApp (17/11/2026)
+
+O fluxo de assinatura **não usa** `app.recipients` nem obriga o administrador a cadastrar o telefone no painel AUVRIUN. O próprio usuário autenticado da Columbia, com `CSENHA.U_HORAS=1`, acessa `https://consultoriarf.net/columbia/horas/assinatura.html`, escolhe temas (metas/resumo), filtros (segmentos/máquinas/funcionários), periodicidade (diário/semanal/mensal), informa o número e confirma por código enviado ao WhatsApp.
+
+**Configuração inicial (uma vez):**
+
+1. Atualizar o Worker Cloudflare `auvriun-whatsapp` com `whatsapp/worker.js`. Publicar apenas o GitHub Pages **não** faz deploy do Worker.
+2. Em `auvriun.com/whatsapp`, criar a aplicação de ID exatamente `columbia`, provedor **W-API**, ativa. A instância W-API global pode ser reutilizada. Criar evento ativo de texto **`fechamento_horas`**. A lista fixa de destinatários pode ficar vazia.
+3. A tela da Columbia chama `/whatsapp/v1/columbia/subscription` diretamente com o JWT `columbia_analista_token`. O Worker verifica esse JWT em `https://columbia.consultoriarf.net/producao/portal/me`, exige `u_horas=1` e usa o nome do usuário autenticado como identidade. Não recebe a chave AUVRIUN em JavaScript.
+4. Endpoints de assinatura da Columbia: `GET /v1/columbia/subscription`, `POST /v1/columbia/subscription/start` (envia código), `POST /v1/columbia/subscription/confirm`, `PUT /v1/columbia/subscription` (altera preferências com número já confirmado), `DELETE /v1/columbia/subscription`. Todos prefixados por `/whatsapp`.
+
+**Etapa seguinte para automatizar horários:**
+- `GET /whatsapp/v1/subscriptions?app=columbia` com Authorization Bearer **chave da aplicação**, somente do backend, retorna assinaturas verificadas, ativas e suas preferências. Nunca chamar diretamente do navegador.
+- `POST /whatsapp/v1/subscription/send`, também com a chave e JSON `{ "app":"columbia", "user":"USUARIO_COLUMBIA", "type":"metas", "event":"fechamento_horas", "reference":"2026-11-metas-mensal", "message":"..." }`. A Central envia **somente** para o telefone verificado daquela pessoa, sem a lista fixa. Há deduplicação por referência e tipo por 35 dias (KV; não transacional).
+- O **agendador de coleta e formatação dos dados** ainda precisa ser instalado no servidor Columbia. A confirmação da assinatura por código funciona independentemente dele, mas a entrega periódica de indicadores só começa depois da instalação. Nunca afirmar que cron já foi ativado pelo commit.
+- Planejamento: diário seg-sex após expediente (dados do dia), semanal segunda-feira (semana anterior), mensal dia 1 (mês anterior). Horário exato a definir; usar America/Sao_Paulo. Enviar apenas texto e barras Unicode, sem PDF ou imagem.
+- Segurança: OTP de seis dígitos, 10 minutos de validade, limite diário de 5 solicitações por telefone e mínimo de 60 segundos entre solicitações por usuário. KV é eventualmente consistente; para produção com escala elevada, substituir controles por Durable Objects ou D1. As mensagens de confirmação pela W-API são não oficiais; respeitar opt-in explícito e monitorar qualidade/entrega.
+
+**Observação:** `/whatsapp/v1/send` continua como antes, com destinatários predefinidos. Esses endpoints de assinatura são separados e não alteram as outras aplicações (ANFEER/PSTEC).
