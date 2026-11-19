@@ -120,7 +120,7 @@ summary{cursor:pointer;font-weight:650;color:#b7d7ff}
 <p class="small">A aplicação precisa comunicar quando o evento ocorrer. Isso é uma integração inicial por aplicação, mas novos destinatários, textos e eventos são administrados aqui.</p>
 </div>
 <div class="card hide" id="historyCard"><div class="row" style="justify-content:space-between"><h2>Histórico de envios</h2><button class="secondary" id="closeHistory">Fechar</button></div>
-<p class="small">ACEITO significa aceito pelo provedor, não entregue. O status muda quando o webhook de entrega está configurado.</p>
+<p class="small">ENFILEIRADO: a Central recebeu o pedido, mas ainda não chamou a W-API. ACEITO: o provedor aceitou a solicitação, não confirma entrega. Na W-API, entrega ainda não é confirmada por webhook.</p>
 <div class="tablewrap"><table><thead><tr><th>Data</th><th>Aplicação</th><th>Evento</th><th>Destino</th><th>Situação</th><th>ID provedor</th></tr></thead><tbody id="historyRows"></tbody></table></div></div>
 </div></section></main>
 <script>
@@ -202,7 +202,7 @@ async function loadPstecMonitor(){
   if(data.lastRun)status.push("Última verificação: "+new Date(data.lastRun).toLocaleString("pt-BR"));
   const r=data.lastResult;
   if(r)status.push("OCs lidas: "+r.found+" | Novas: "+r.newOrders+" | Pagamento confirmado: "+r.eligible+
-    " | Alertas aceitos: "+r.notified+(r.errors?.length?" | Falhas: "+r.errors.join("; "):""));
+    " | Ocorrências registradas: "+r.notified+(r.errors?.length?" | Falhas: "+r.errors.join("; "):""));
   $("pstecMonitorState").textContent=status.join("\n");
   $("pstecMonitorState").style.whiteSpace="pre-line";
   $("pstecMonitorSetup").disabled=data.configured;
@@ -219,7 +219,7 @@ async function monitorPstecAction(action){
   await loadPstecMonitor();
   const summary=response.message||("OCs: "+(response.found||0)+
     " | Novas: "+(response.newOrders||0)+" | Elegíveis: "+(response.eligible||0)+
-    " | Envios aceitos: "+(response.notified||0));
+    " | Ocorrências registradas: "+(response.notified||0));
   notice(summary+(response.errors?.length?"\nFalhas: "+response.errors.join("; "):""));
   return response;
 }
@@ -333,7 +333,7 @@ $("sendNow").onclick=async()=>{
     $("sendNow").disabled=true;
     try{
       const d=await call("/admin/apps/"+app.id+"/test",{method:"POST",body:JSON.stringify({event,message,only})});
-      notice("Mensagem enviada à API: "+d.accepted+"/"+d.requested+" aceitas. Confirme o recebimento nos celulares.");
+      notice(d.queued?"Fila W-API: "+d.queued+"/"+d.requested+" enfileirada(s). Ainda não enviadas; consulte Histórico.":"Solicitações aceitas pela API: "+d.accepted+"/"+d.requested+". Confirme o recebimento.");
     }finally{$("sendNow").disabled=false;}
   }catch(e){notice(e.message,true);}
 };
@@ -365,7 +365,7 @@ $("test").onclick=async()=>{try{const id=$("appId").value.trim(),a=apps.find(x=>
   if(!confirm("Enviar um TESTE de "+event.id+" para TODOS os "+recipients.length+" destinatário(s) ativos?"))return;
   const data=await call("/admin/apps/"+id+"/test",{method:"POST",body:JSON.stringify({
     event:event.id,message:(a.brand==="CONSULTORIARF"?"CONSULTORIA RF":"AUVRIUN")+" | Teste de envio WhatsApp ("+id+")"})});
-  notice("Teste: "+data.accepted+"/"+data.requested+" aceite(s) pelo provedor. Aceite não significa entrega.");}
+  notice(data.queued?"Teste enfileirado para "+data.queued+" destinatário(s). Verifique o Histórico e o recebimento.":"Teste: "+data.accepted+"/"+data.requested+" aceito(s) pelo provedor. Aceite não confirma entrega.");}
   catch(e){notice(e.message,true);}};
 $("refresh").onclick=async()=>{try{await reload();notice("Lista atualizada.");}catch(e){notice(e.message,true);}};
 $("historyButton").onclick=async()=>{try{const d=await call("/admin/history");
