@@ -205,7 +205,7 @@ async function sendOne(env,app,event,recipient,content,reference,origin,provider
     if(record.messageId && record.status==="ACCEPTED")
       await env.AUVRIUN_KV.put("message:"+record.messageId,key,{expirationTtl:MAX_HISTORY_AGE});
   }catch(error){record.status="ERROR";record.error=limitText(error?.message||error,200);}
-  try{await env.AUVRIUN_KV.put(key,JSON.stringify(record),{expirationTtl:MAX_HISTORY_AGE});}
+  try{if(record.status!=="QUEUED")await env.AUVRIUN_KV.put(key,JSON.stringify(record),{expirationTtl:MAX_HISTORY_AGE});}
   catch(error){console.error("AUVRIUN HISTORICO NAO GRAVADO",String(error));}
   console.log("AUVRIUN ENVIO",JSON.stringify({app:app.id,event:event.id,final:record.phoneFinal,
     status:record.status,http:record.http,messageId:record.messageId}));
@@ -244,6 +244,16 @@ export class WapiOutbox {
       return {ok:true,queued:true,duplicate:false};
     });
     if(!saved.ok)return Response.json(saved,{status:429});
+    // O Durable Object grava QUEUED ANTES de agendar o envio, evitando que
+    // o Worker substitua posteriormente um ACCEPTED por QUEUED no histórico.
+    if(!saved.duplicate){
+      await this.env.AUVRIUN_KV.put(data.historyId,JSON.stringify({
+        id:data.historyId,app:data.appId,event:data.eventId,reference:data.reference,
+        recipient:data.recipient.name,phoneFinal:data.recipient.phone.slice(-4),
+        provider:"WAPI",createdAt:new Date().toISOString(),
+        status:"QUEUED",http:202,messageId:null
+      }),{expirationTtl:MAX_HISTORY_AGE});
+    }
     if(await this.state.storage.getAlarm()===null&&!this.processing)
       await this.state.storage.setAlarm(Date.now()+1500);
     return Response.json(saved,{status:202});
