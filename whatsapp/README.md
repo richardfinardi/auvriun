@@ -1,3 +1,36 @@
+# Preparação de alteração: fila W-API compartilhada (19/11/2026)
+
+> **Esta alteração está somente em uma branch de revisão, NÃO em produção.**
+> Não ativar automaticamente o Cron nem reprocessar mensagens antigas. A limitação do WhatsApp ainda pode ocorrer mesmo com fila.
+
+**Problema identificado no código anterior:** `dispatch()` enviava vários destinatários em paralelo usando `Promise.all`. Além disso, três aplicações podiam chamar a Central simultaneamente. Um atraso apenas no `Promise.all` não solucionaria essa concorrência entre ANFEER, PSTEC e Columbia.
+
+**Solução preparada nesta branch:**
+- **Fila persistente por instância W-API**, com Durable Object e armazenamento SQLite. Todos os aplicativos que compartilham o mesmo `instanceId` passam pela **mesma** fila.
+- Apenas **uma tentativa W-API por vez**, com **intervalo técnico mínimo de 8 segundos** entre tentativas (não é proteção garantida contra restrições).
+- Máximo de 200 solicitações pendentes por instância; expiração de solicitações com mais de 15 minutos para não enviar notificações antigas.
+- Deduplicação por aplicação/evento/destinatário/referência durante 24 horas. Solicitações de teste e de OTP têm tratamento separado.
+- Nenhum reenvio automático se a resposta da W-API for indeterminada.
+- Histórico diferencia `QUEUED` (na fila), `ACCEPTED` (aceito pelo provedor), `REJECTED`, `EXPIRED`, `UNKNOWN` e `DUPLICATE`.
+- A fila funciona também para códigos de confirmação e relatórios da Columbia, além de mensagens enviadas pelo endpoint geral `/v1/send`.
+- **Trava de segurança:** sem `WAPI_SEND_ENABLED=true`, a Central **não aceita novos envios W-API**, e a fila já existente **não é processada**. A W-API permanece pausada por padrão.
+
+## Quando estiver no computador: checklist de implantação
+
+1. **Não mesclar ou publicar no Worker diretamente ainda.** Primeiro revisar esta branch e os serviços ANFEER/PSTEC/Columbia que dependem de `accepted`.
+2. Conferir no Cloudflare Worker `auvriun-whatsapp` as configurações existentes e fazer backup do código atual e dos Bindings. Não tocar nos Secrets existentes.
+3. A nova classe precisa do Binding `WAPI_OUTBOX` e da migração SQLite `wapi_outbox_v1`, descritos em `whatsapp/wrangler.jsonc`. **Copiar apenas `worker.js` no editor do Cloudflare NÃO é suficiente.** Preferir deploy via Wrangler com a configuração validada.
+4. Antes do deploy, validar a sintaxe (`node --check whatsapp/worker.js`) e a configuração (`npx wrangler deploy --dry-run --config whatsapp/wrangler.jsonc`, executado a partir da raiz do repositório; ajustar caminho de trabalho se necessário).
+5. Em **Settings → Variables and Secrets** do Worker, confirmar que `WAPI_SEND_ENABLED` está ausente ou `false`. Só após confirmar o deploy e o estado da fila, definir `WAPI_SEND_ENABLED=true` para um teste controlado com **um destinatário autorizado**.
+6. Conferir no painel `https://auvriun.com/whatsapp/` o Histórico: `QUEUED` deve evoluir para `ACCEPTED`, ou expor erro. Confirmar também o recebimento real no telefone, pois não há webhook W-API de entrega nesta versão.
+7. Não reativar os triggers de ANFEER, PSTEC ou Columbia em massa. Fazer validação isolada de cada integração antes.
+
+**Compatibilidade importante:** o retorno da API mantém o campo `accepted` para não quebrar aplicativos já integrados, mas na W-API ele **pode contabilizar mensagens apenas enfileiradas**; o campo novo `queued` explicita isso. O monitor ANFEER ainda pode registrar `NOTIFICADO` no D1 quando a Central apenas enfileira, portanto **não considerar esse status como prova de entrega**. Para refletir entrega de verdade, falta implementar/validar confirmação de entrega da W-API e reconciliar os sistemas de origem. Nenhuma mensagem antiga será reprocessada automaticamente pela fila nova.
+
+**Limites:** um `ACCEPTED` é resposta de aceite da API W-API e não prova de entrega. A W-API não é oficial; intervalos não afastam o risco de novas restrições do WhatsApp. É necessário consentimento dos destinatários e acompanhamento de qualidade.
+
+---
+
 # AUVRIUN WhatsApp Hub
 
 ## Operação diária: tudo pelo painel (atualização 11/11/2026)

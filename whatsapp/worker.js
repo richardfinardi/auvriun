@@ -162,11 +162,15 @@ async function sendOne(env,app,event,recipient,content,reference,origin,provider
     let response;
     try {
       if(app.provider==="WAPI"){
-        response=await fetch("https://api.w-api.app/v1/message/send-text?instanceId="+encodeURIComponent(providerConfig.instanceId),{
-          method:"POST",headers:{"content-type":"application/json",
-            "authorization":"Bearer "+providerConfig.token},
-          body:JSON.stringify({phone:recipient.phone,message:content.body.message}),
-          signal:controller.signal
+        if(String(env.WAPI_SEND_ENABLED||"").toLowerCase()!=="true")
+          throw Error("W-API pausada: ative WAPI_SEND_ENABLED=true somente após validação");
+        if(!env.WAPI_OUTBOX)throw Error("Binding WAPI_OUTBOX não configurado; envio recusado");
+        const stub=env.WAPI_OUTBOX.get(env.WAPI_OUTBOX.idFromName(providerConfig.instanceId));
+        response=await stub.fetch("https://outbox.internal/enqueue",{
+          method:"POST",headers:{"content-type":"application/json"},
+          body:JSON.stringify({appId:app.id,eventId:event.id,recipient,
+            content,reference:limitText(reference,100),instanceId:providerConfig.instanceId,
+            historyId:key,expiresAt:Date.now()+15*60*1000})
         });
       }else{
         response=await fetch(API+encodeURIComponent(String(env.OMNI_CHANNEL_ID))+"/messages",{
@@ -183,7 +187,9 @@ async function sendOne(env,app,event,recipient,content,reference,origin,provider
     record.http=response.status;
     const rejected=result.ok===false||result.success===false||result.error===true||
       typeof result.error==="string"&&!!result.error||result.status===false;
-    record.status=response.ok&&!rejected?"ACCEPTED":"REJECTED";
+    record.status=response.status===202 && result.queued===true
+      ? (result.duplicate?"DUPLICATE":"QUEUED")
+      : response.ok&&!rejected?"ACCEPTED":"REJECTED";
     if(record.status==="REJECTED"){
       const providerMessage=
         typeof result.message==="string"?result.message:
@@ -199,13 +205,133 @@ async function sendOne(env,app,event,recipient,content,reference,origin,provider
     if(record.messageId && record.status==="ACCEPTED")
       await env.AUVRIUN_KV.put("message:"+record.messageId,key,{expirationTtl:MAX_HISTORY_AGE});
   }catch(error){record.status="ERROR";record.error=limitText(error?.message||error,200);}
-  try{await env.AUVRIUN_KV.put(key,JSON.stringify(record),{expirationTtl:MAX_HISTORY_AGE});}
+  try{if(record.status!=="QUEUED")await env.AUVRIUN_KV.put(key,JSON.stringify(record),{expirationTtl:MAX_HISTORY_AGE});}
   catch(error){console.error("AUVRIUN HISTORICO NAO GRAVADO",String(error));}
   console.log("AUVRIUN ENVIO",JSON.stringify({app:app.id,event:event.id,final:record.phoneFinal,
     status:record.status,http:record.http,messageId:record.messageId}));
   return {recipient:record.recipient,phoneFinal:record.phoneFinal,
     status:record.status,http:record.http,messageId:record.messageId,error:record.error||null};
 }
+
+/* A W-API é serializada entre TODAS as aplicações que compartilham a instância.
+   Durable Object SQLite: fila persistente, deduplicação e espaçamento de 8s.
+   Nunca reenviar automaticamente uma chamada cujo resultado seja incerto. */
+const OUTBOX_GAP_MS=8000,OUTBOX_TTL_MS=15*60*1000,OUTBOX_MAX_PENDING=200;
+export class WapiOutbox {
+  constructor(state,env){this.state=state;this.env=env;this.processing=false;}
+  async fetch(request){
+    if(request.method!=="POST"||new URL(request.url).pathname!=="/enqueue")
+      return new Response("Not found",{status:404});
+    let data;try{data=await request.json();}catch{return Response.json({ok:false,error:"JSON inválido"},{status:400});}
+    if(!data||!validSlug(data.appId)||!data.eventId||
+       !phone(data.recipient?.phone)||!data.content?.body?.message||
+       !data.historyId||!Number.isFinite(data.expiresAt))
+      return Response.json({ok:false,error:"Solicitação de fila inválida"},{status:400});
+    const special=["admin-test","teste-columbia","verificacao-whatsapp"].some(x=>
+      String(data.reference||"").startsWith(x));
+    const dedupe=await hash(special||!data.reference
+      ? [data.appId,data.eventId,data.recipient.phone,data.content.body.message,Math.floor(Date.now()/120000)].join("|")
+      : [data.appId,data.eventId,data.recipient.phone,data.reference].join("|"));
+    const saved=await this.state.storage.transaction(async tx=>{
+      const old=await tx.get("dedup:"+dedupe);
+      if(old&&old.expires>Date.now())return {ok:true,queued:true,duplicate:true};
+      const depth=Number(await tx.get("depth")||0);
+      if(depth>=OUTBOX_MAX_PENDING)return {ok:false,error:"Fila da instância cheia"};
+      const seq=Number(await tx.get("seq")||0)+1;
+      await tx.put("seq",seq);await tx.put("depth",depth+1);
+      await tx.put("job:"+String(seq).padStart(14,"0"),{...data,state:"QUEUED"});
+      await tx.put("dedup:"+dedupe,{expires:Date.now()+86400000});
+      return {ok:true,queued:true,duplicate:false};
+    });
+    if(!saved.ok)return Response.json(saved,{status:429});
+    // O Durable Object grava QUEUED ANTES de agendar o envio, evitando que
+    // o Worker substitua posteriormente um ACCEPTED por QUEUED no histórico.
+    if(!saved.duplicate){
+      await this.env.AUVRIUN_KV.put(data.historyId,JSON.stringify({
+        id:data.historyId,app:data.appId,event:data.eventId,reference:data.reference,
+        recipient:data.recipient.name,phoneFinal:data.recipient.phone.slice(-4),
+        provider:"WAPI",createdAt:new Date().toISOString(),
+        status:"QUEUED",http:202,messageId:null
+      }),{expirationTtl:MAX_HISTORY_AGE});
+    }
+    if(await this.state.storage.getAlarm()===null&&!this.processing)
+      await this.state.storage.setAlarm(Date.now()+1500);
+    return Response.json(saved,{status:202});
+  }
+  async mark(job,status,error=null,http=null,messageId=null){
+    const entry={id:job.historyId,app:job.appId,event:job.eventId,
+      reference:job.reference,recipient:job.recipient.name,phoneFinal:job.recipient.phone.slice(-4),
+      provider:"WAPI",createdAt:job.createdAt||new Date().toISOString(),
+      updatedAt:new Date().toISOString(),status,http,messageId,
+      ...(error?{error:limitText(error,180)}:{})};
+    try{await this.env.AUVRIUN_KV.put(job.historyId,JSON.stringify(entry),{expirationTtl:MAX_HISTORY_AGE});}
+    catch(e){console.error("WAPI HISTORICO FALHA",String(e));}
+  }
+  async alarm(){
+    if(this.processing)return;
+    this.processing=true;
+    try{
+      const list=await this.state.storage.list({prefix:"job:",limit:1});
+      const first=list.entries().next().value;
+      if(!first)return;
+      const [key,job]=first;
+      if(String(this.env.WAPI_SEND_ENABLED||"").toLowerCase()!=="true"){
+        await this.state.storage.setAlarm(Date.now()+5*60*1000);
+        return;
+      }
+      const last=Number(await this.state.storage.get("lastAttempt")||0);
+      if(Date.now()<last+OUTBOX_GAP_MS){
+        await this.state.storage.setAlarm(last+OUTBOX_GAP_MS);
+        return;
+      }
+      if(job.state==="PROCESSING"){
+        await this.mark(job,"UNKNOWN","Envio interrompido; sem repetição automática");
+      }else if(Date.now()>job.expiresAt){
+        await this.mark(job,"EXPIRED","Prazo máximo da fila excedido, sem envio");
+      }else{
+        await this.state.storage.put(key,{...job,state:"PROCESSING"});
+        await this.state.storage.put("lastAttempt",Date.now());
+        // Se o isolate cair durante a chamada, próximo alarme registra UNKNOWN.
+        await this.state.storage.setAlarm(Date.now()+45000);
+        try{
+          const app=await appRead(this.env,job.appId);
+          if(!app?.active||app.provider!=="WAPI")throw Error("Aplicação desativada ou provedor alterado");
+          if(!app.events.some(e=>e.id===job.eventId&&e.active))throw Error("Evento desativado");
+          const cfg=await providerCredentials(this.env,app);
+          if(cfg.instanceId!==job.instanceId)throw Error("Instância W-API alterada após o enfileiramento");
+          const abort=new AbortController();
+          const timer=setTimeout(()=>abort.abort(),12000);
+          let response;
+          try{
+            response=await fetch("https://api.w-api.app/v1/message/send-text?instanceId="+encodeURIComponent(cfg.instanceId),{
+              method:"POST",headers:{"content-type":"application/json","authorization":"Bearer "+cfg.token},
+              body:JSON.stringify({phone:job.recipient.phone,message:job.content.body.message}),
+              signal:abort.signal
+            });
+          }finally{clearTimeout(timer);}
+          const raw=(await response.text()).slice(0,5000);
+          let payload={};try{payload=JSON.parse(raw)||{};}catch{}
+          const failed=payload.ok===false||payload.success===false||payload.error===true||
+            typeof payload.error==="string"&&!!payload.error||payload.status===false;
+          const id=payload.messageId||payload.data?.messageId||payload.id||payload.data?.id||payload.key?.id||null;
+          const status=response.ok&&!failed?"ACCEPTED":"REJECTED";
+          await this.mark(job,status,status==="REJECTED"?"Provedor recusou solicitação":"",response.status,id?String(id).slice(0,120):null);
+          console.log("WAPI FILA",JSON.stringify({app:job.appId,event:job.eventId,status,http:response.status}));
+        }catch(e){
+          await this.mark(job,"UNKNOWN",e?.message||e);
+          console.error("WAPI FILA RESULTADO INCERTO",String(e?.message||e));
+        }
+      }
+      await this.state.storage.transaction(async tx=>{
+        await tx.delete(key);
+        await tx.put("depth",Math.max(0,Number(await tx.get("depth")||1)-1));
+      });
+      const next=await this.state.storage.list({prefix:"job:",limit:1});
+      if(next.size)await this.state.storage.setAlarm(Date.now()+OUTBOX_GAP_MS);
+    }finally{this.processing=false;}
+  }
+}
+
 async function dispatch(env,app,payload) {
   if(!app?.active)throw new Error("Aplicação desativada ou inexistente");
   if(!app.keyHash && !payload.__admin)throw new Error("Aplicação sem chave");
@@ -242,14 +368,15 @@ async function dispatch(env,app,payload) {
   }
   const providerConfig=await providerCredentials(env,app);
   const results=await Promise.all(selected.map(r=>sendOne(env,app,event,r,content,payload.reference,"",providerConfig)));
-  const accepted=results.filter(r=>r.status==="ACCEPTED").length;
+  const accepted=results.filter(r=>["ACCEPTED","QUEUED","DUPLICATE"].includes(r.status)).length;
+  const queued=results.filter(r=>r.status==="QUEUED").length;
   const firstFailure=results.find(r=>r.status!=="ACCEPTED");
   return {ok:accepted>0,app:app.id,event:event.id,
-    requested:results.length,accepted,
+    requested:results.length,accepted,queued,
     provider:app.provider||"OMNI",
     ...(accepted===0?{error:"Nenhum envio aceito pela "+(app.provider==="WAPI"?"W-API":"Omni")+
       ". "+(firstFailure?.error||("HTTP "+(firstFailure?.http||"indisponível")))}:{}),
-    note:"ACCEPTED significa aceite pela API, não comprova entrega no WhatsApp.",results};
+    note:queued?"QUEUED: entrada na fila, ainda NÃO enviada. accepted foi preservado apenas para compatibilidade com sistemas existentes.":"ACCEPTED indica aceite do provedor, não entrega confirmada.",results};
 }
 
 
@@ -344,11 +471,11 @@ async function selfSubscriptionRoute(req,env,path,origin,u,trusted=null){
   const bytes=crypto.getRandomValues(new Uint32Array(1));
   const otp=String(100000+bytes[0]%900000),salt=crypto.randomUUID();
   const status=await wapiOptin(env,app,{otp,phone:number});
-  if(status.status!=="ACCEPTED")throw Error("Não foi possível enviar o código: "+(status.error||status.status));
+  if(!["ACCEPTED","QUEUED","DUPLICATE"].includes(status.status))throw Error("Não foi possível enfileirar o código: "+(status.error||status.status));
   await env.AUVRIUN_KV.put(pending,JSON.stringify({
    phone:number,user:String(input.user),preferences,createdMs:now,hash:await hash(salt+otp),salt,attempts:0
   }),{expirationTtl:SELF_OTP_WINDOW});
-  return json({ok:true,verification:"sent",phoneFinal:number.slice(-4),expiresMinutes:10},200,origin);
+  return json({ok:true,verification:"queued",phoneFinal:number.slice(-4),expiresMinutes:10},200,origin);
  }
  if(path==="/v1/subscription/confirm"&&req.method==="POST"){
   const otp=String(input.code||"").trim();
@@ -417,12 +544,12 @@ async function selfSubscriptionRoute(req,env,path,origin,u,trusted=null){
   const cfg=await providerCredentials(env,app);
   const result=await sendOne(env,app,event,{name:current.user,phone:current.phone},
     {type:"TEXT",body:{message}},"teste-columbia","",cfg);
-  if(result.status!=="ACCEPTED")
-   return json({ok:false,status:result.status,error:result.error||"Provedor recusou o envio"},502,origin);
+  if(!["QUEUED","DUPLICATE"].includes(result.status))
+   return json({ok:false,status:result.status,error:result.error||"Fila recusou o envio"},502,origin);
   await env.AUVRIUN_KV.put(dailyKey,String(used+1),{expirationTtl:86400});
   await env.AUVRIUN_KV.put(lastKey,String(Date.now()),{expirationTtl:120});
-  return json({ok:true,status:"ACCEPTED",phoneFinal:current.phone.slice(-4),
-    notice:"Aceito pela W-API. Verifique o recebimento no WhatsApp."},200,origin);
+  return json({ok:true,status:result.status,phoneFinal:current.phone.slice(-4),
+    notice:"Mensagem enfileirada, entrega ainda não confirmada."},200,origin);
  }
  if(path==="/v1/subscription/send"&&req.method==="POST"){
   if(!current?.active||!current.phone)throw Error("Destinatário não confirmou assinatura");
@@ -440,9 +567,9 @@ async function selfSubscriptionRoute(req,env,path,origin,u,trusted=null){
   const cfg=await providerCredentials(env,app);
   const result=await sendOne(env,app,event,{name:current.user,phone:current.phone},
     {type:"TEXT",body:{message}} ,reference,"",cfg);
-  if(result.status==="ACCEPTED")await env.AUVRIUN_KV.put(uniq,"1",{expirationTtl:86400*35});
-  return json({ok:result.status==="ACCEPTED",status:result.status,error:result.error||null},
-    result.status==="ACCEPTED"?200:502,origin);
+  if(["QUEUED","DUPLICATE"].includes(result.status))await env.AUVRIUN_KV.put(uniq,"1",{expirationTtl:86400*35});
+  return json({ok:["QUEUED","DUPLICATE"].includes(result.status),status:result.status,error:result.error||null},
+    ["QUEUED","DUPLICATE"].includes(result.status)?200:502,origin);
  }
  return fail("Operação de assinatura não encontrada",404,origin);
 }
