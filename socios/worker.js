@@ -51,8 +51,18 @@ function parseResponse(row){
  return row?{partner_id:row.partner_id,name:PARTNER_NAMES[row.partner_id],answers:JSON.parse(row.answers),completed:!!row.completed,revision:row.revision,updated_at:row.updated_at,completed_at:row.completed_at}:null;
 }
 async function statusData(env){
- const rows=(await env.DB.prepare("SELECT partner_id,display_name,completed,updated_at FROM societary_answers ORDER BY partner_id").all()).results||[];
- return [1,2,3].map(id=>{const r=rows.find(x=>x.partner_id===id);return {partner_id:id,name:PARTNER_NAMES[id],completed:!!r?.completed,has_draft:!!r,updated_at:r?.updated_at||null}});
+ const rows=(await env.DB.prepare("SELECT partner_id,completed,updated_at,answers FROM societary_answers ORDER BY partner_id").all()).results||[];
+ return [1,2,3].map(id=>{
+  const r=rows.find(x=>x.partner_id===id);
+  let answered_count=0;
+  if(r){
+   try{
+    const a=JSON.parse(r.answers);
+    if(a&&typeof a==="object"&&!Array.isArray(a))answered_count=Object.values(a).filter(item=>item&&typeof item.choice==="string"&&item.choice.trim()!=="").length;
+   }catch{answered_count=0}
+  }
+  return {partner_id:id,name:PARTNER_NAMES[id],completed:!!r?.completed,has_draft:!!r,answered_count:Math.min(REQUIRED_ANSWERS,answered_count),total_questions:REQUIRED_ANSWERS,updated_at:r?.updated_at||null};
+ });
 }
 async function audit(env,partner_id,action,revision){
  await env.DB.prepare("INSERT INTO societary_audit (partner_id,action,revision) VALUES (?,?,?)").bind(partner_id,action,revision).run();
@@ -79,7 +89,10 @@ export default {
    const actor=await identify(request,env);
    if(!actor)return respond({error:"Código de acesso inválido."},401,origin);
    if(url.pathname==="/api/me"&&request.method==="GET")return respond(actor,200,origin);
-   if(url.pathname==="/api/status"&&request.method==="GET")return respond({statuses:await statusData(env)},200,origin);
+   if(url.pathname==="/api/status"&&request.method==="GET"){
+     if(actor.role!=="admin")return respond({error:"Acompanhamento restrito ao administrador."},403,origin);
+     return respond({statuses:await statusData(env)},200,origin);
+    }
    if(url.pathname==="/api/response"&&request.method==="GET"){
     if(actor.role!=="partner")return respond({error:"Somente os sócios podem acessar a própria resposta."},403,origin);
     const row=await env.DB.prepare("SELECT * FROM societary_answers WHERE partner_id=?").bind(actor.partner_id).first();
