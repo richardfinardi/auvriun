@@ -6,25 +6,34 @@
  const el=id=>document.getElementById(id);
  const norm=s=>String(s||"").trim().replace(/\s+/g," ").toLocaleLowerCase("pt-BR");
  const safe=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- const data={slot:0,name:"",answers:{},completed:false,revision:0,section:0,code:"",records:[null,null,null],filtered:[],remoteBusy:false,adminKey:"",decisions:{}};
- let saveTimer, saveQueue=Promise.resolve(), lastError="";
+ const data={slot:0,name:"",answers:{},completed:false,revision:0,section:0,code:"",records:[null,null,null],adminKey:"",decisions:{},ready:false};
+ let saveTimer, saveQueue=Promise.resolve();
  const setMsg=(id,s,error=false)=>{el(id).textContent=s;el(id).classList.toggle("error",!!error)};
- function localKey(id){return "auvriun-socios-v1-"+id}
- function getLocal(id){try{return JSON.parse(localStorage.getItem(localKey(id))||"null")}catch{return null}}
- function keepLocal(){if(!data.slot)return;try{localStorage.setItem(localKey(data.slot),JSON.stringify({format:"auvriun-acordo-v1",partner_id:data.slot,name:data.name,answers:data.answers,completed:data.completed,revision:data.revision,updated_at:new Date().toISOString()}))}catch{setMsg("saveStatus","Não foi possível guardar o rascunho neste dispositivo.",true)}}
  function isAnswered(q){return !!(data.answers[q.id]&&data.answers[q.id].choice)}
  function answered(){return questions.filter(isAnswered).length}
  function currentSectionComplete(i){return survey.sections[i].questions.every(isAnswered)}
  function showTab(tab){const response=tab==="response";el("responsePane").classList.toggle("hidden",!response);el("comparePane").classList.toggle("hidden",response);el("tabResponse").classList.toggle("active",response);el("tabCompare").classList.toggle("active",!response);if(!response)renderReport();}
- function activateMode(){
-  el("onlineAuth").classList.toggle("hidden",!API);
-  el("adminAuth").classList.toggle("hidden",!API);
-  el("importArea").classList.toggle("hidden",!!API);
-  el("modeNotice").textContent=API ? "Acesso protegido: informe seu código individual. O rascunho será sincronizado com o servidor e poderá ser retomado de outro dispositivo." : "Modo local provisório: suas respostas ficam somente neste navegador. Para entregá-las, use “Exportar resposta” e envie o arquivo JSON ao responsável. O salvamento central está pendente de configuração.";
-  el("compareMode").textContent=API ? "Somente o administrador autorizado consegue visualizar a conciliação. A comparação online é liberada após as três respostas serem concluídas." : "Conciliação local: importe até três arquivos JSON exportados pelos sócios. Nenhuma resposta é publicada no GitHub ou enviada a um servidor.";
+ async function activateMode(){
+  el("start").disabled=true;
+  el("modeNotice").textContent="Verificando a conexão com o banco de respostas...";
+  el("compareMode").textContent="O comparativo fica disponível apenas para o administrador após os três sócios concluírem as respostas.";
+  if(!API){el("modeNotice").textContent="O armazenamento central ainda não foi ativado. O questionário ficará bloqueado para evitar perda de respostas.";return;}
+  try{
+   const resp=await fetch(API+"/api/health",{cache:"no-store"});
+   const state=await resp.json();
+   if(!resp.ok||!state.ok||!state.database_configured)throw Error("Servidor não pronto");
+   data.ready=true;el("start").disabled=false;
+   el("modeNotice").textContent="Banco central conectado. Selecione seu nome e informe seu código individual. As respostas são salvas automaticamente e podem ser retomadas em outro aparelho.";
+  }catch{
+   data.ready=false;el("start").disabled=true;
+   el("modeNotice").textContent="O armazenamento central ainda não está disponível. A ativação do servidor é necessária antes de enviar respostas.";
+  }
  }
  async function request(method,path,code,body){
-  const r=await fetch(API+path,{method,headers:{"Authorization":"Bearer "+code, ...(body?{"Content-Type":"application/json"}:{})},body:body?JSON.stringify(body):undefined,cache:"no-store",mode:"cors"});
+  if(!data.ready)throw Error("Banco central indisponível.");
+  let r;
+  try{r=await fetch(API+path,{method,headers:{"Authorization":"Bearer "+code, ...(body?{"Content-Type":"application/json"}:{})},body:body?JSON.stringify(body):undefined,cache:"no-store",mode:"cors"});}
+  catch{throw Error("Sem conexão com o servidor. Verifique a internet e tente novamente.");}
   let output={};try{output=await r.json()}catch{}if(!r.ok)throw new Error(output.error||("Erro HTTP "+r.status));
   return output;
  }
@@ -32,18 +41,19 @@
   const id=Number(el("partner").value),name=PARTNERS[id]||"",code=el("partnerCode").value.trim();
   if(![1,2,3].includes(id))return setMsg("welcomeMsg","Selecione Adivelto, Julio ou Richard.",true);
   if(name.length<2)return setMsg("welcomeMsg","Informe seu nome.",true);
-  if(API&&!code)return setMsg("welcomeMsg","Informe seu código de acesso.",true);
+  if(!data.ready)return setMsg("welcomeMsg","O banco central ainda não está disponível.",true);
+   if(!code)return setMsg("welcomeMsg","Informe seu código individual.",true);
   el("start").disabled=true;setMsg("welcomeMsg","Abrindo resposta...");
   try{
-   let remote=null;
-   if(API){const me=await request("GET","/api/me",code);if(me.role!=="partner"||me.partner_id!==id)throw Error("O código informado não pertence ao sócio selecionado.");const output=await request("GET","/api/response",code);remote=output.response;}
-   const draft=getLocal(id);
-   data.slot=id;data.code=code;data.name=name;data.answers=remote?.answers||draft?.answers||{};
-   data.completed=!!(remote?.completed ?? draft?.completed);data.revision=remote?.revision||0;data.section=0;
-   if(!remote && !draft)data.name=name;
+   const me=await request("GET","/api/me",code);
+   if(me.role!=="partner"||me.partner_id!==id)throw Error("O código informado não pertence ao sócio selecionado.");
+   const output=await request("GET","/api/response",code);
+   const remote=output.response;
+   data.slot=id;data.code=code;data.name=name;data.answers=remote?.answers||{};
+   data.completed=!!remote?.completed;data.revision=remote?.revision||0;data.section=0;
    el("partnerName").value=data.name;
    el("welcome").classList.add("hidden");el("surveyView").classList.remove("hidden");
-   keepLocal();renderSurvey();setMsg("welcomeMsg","");
+   renderSurvey();setMsg("welcomeMsg","");
   }catch(e){setMsg("welcomeMsg",e.message,true)}finally{el("start").disabled=false}
  }
  function renderSurvey(){
