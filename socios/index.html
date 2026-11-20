@@ -20,6 +20,18 @@ main{padding:32px 0 80px}.eyebrow{font-size:11px;color:#8fbcff;font-weight:750;l
 @media(max-width:700px){.panel{padding:17px}.grid{grid-template-columns:1fr}.comparecols{grid-template-columns:1fr}.summarynums{grid-template-columns:repeat(2,1fr)}.question{padding:14px}.controls .btn{flex:1}.head img{width:126px}main{padding-top:25px}}@media print{body{background:white;color:black;font-size:11px}.shell{width:100%}header,.tabs,.intro,.controls,.noprint,#compareAccess,#responsePane,.footer{display:none!important}main{padding:0}.panel,.comparecard,.comparecol{background:white;color:black;border-color:#bbb;box-shadow:none;break-inside:avoid}.muted,.who,.comment{color:#555!important}.comparecols{grid-template-columns:repeat(3,1fr)}.summarynums>div{border-color:#ccc;background:white}.comparecard{page-break-inside:avoid}}
 .controls{flex-wrap:wrap}.save-feedback{flex-basis:100%;font-size:13px;color:var(--muted);font-weight:650;padding:3px 1px}.save-feedback.success{color:#91e5c7}.save-feedback.error{color:#ffb8bb}.btn.saved{background:#195943;border-color:#48c4a2;color:#f0fff9}
 .save-toast{position:fixed;top:calc(18px + env(safe-area-inset-top, 0px));left:50%;transform:translate(-50%,-12px);width:max-content;max-width:calc(100vw - 30px);padding:14px 20px;border-radius:12px;z-index:9999;box-shadow:0 12px 36px #0009;background:#123d33;border:1px solid #57ccab;color:#f0fff9;font-weight:800;text-align:center;opacity:0;visibility:hidden;transition:.2s}.save-toast.error{background:#59272e;border-color:#f18b90}.save-toast.visible{opacity:1;visibility:visible;transform:translate(-50%,0)}
+
+.admin-overview{margin-top:15px;padding-top:16px;border-top:1px solid var(--line)}
+.admin-overview-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.admin-overview-head h3{margin:0;font-size:17px}
+.partner-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.partner-status-card{background:#0c182b;border:1px solid #304561;border-radius:13px;padding:15px;min-width:0}
+.partner-status-card .name{font-weight:800;font-size:17px}
+.partner-status-card .number{font-size:23px;font-weight:800;letter-spacing:-.02em;margin:8px 0 1px}
+.partner-status-card .updated{font-size:12px;color:var(--muted);margin-top:10px}
+.partner-status-card .progress{margin-top:12px}
+.admin-overview-meta{font-size:12px;color:var(--muted);margin-top:12px}
+@media(max-width:700px){.partner-grid{grid-template-columns:1fr}.partner-status-card .number{font-size:22px}}
 </style>
 </head>
 <body>
@@ -48,6 +60,11 @@ main{padding:32px 0 80px}.eyebrow{font-size:11px;color:#8fbcff;font-weight:750;l
 <div id="compareMode" class="info"></div>
 <div id="adminAuth" class="stack"><div class="field"><label for="adminCode">Código de administração</label><input type="password" id="adminCode" autocomplete="off" placeholder="Código do administrador"></div><div class="row"><button class="btn" id="loadOnline">Carregar respostas protegidas</button></div><div id="adminActions" class="row hidden"><select id="reopenPartner" aria-label="Sócio que deseja reabrir" style="max-width:190px"><option value="1">Reabrir Adivelto</option><option value="2">Reabrir Julio</option><option value="3">Reabrir Richard</option></select><button id="reopen" class="btn ghost" type="button">Reabrir resposta concluída</button></div></div>
 <div class="statusline" id="compareMsg" role="status"></div>
+<div id="adminOverview" class="admin-overview hidden">
+ <div class="admin-overview-head"><h3>Acompanhamento das respostas</h3><button id="refreshProgress" type="button" class="btn secondary">Atualizar status</button></div>
+ <div id="partnerProgress" class="partner-grid"></div>
+ <div id="progressUpdated" class="admin-overview-meta"></div>
+</div>
 </div>
 <div id="report" class="hidden"><div class="panel"><div class="space"><div><div class="eyebrow">Relatório de conciliação</div><h2>Comparativo dos três sócios</h2><div id="reportDate" class="muted small"></div></div><div class="row noprint"><button id="csv" class="btn secondary">Planilha de conciliação</button><button id="print" class="btn ghost">Relatório em PDF</button></div></div>
 <div id="threeNames" class="guide"></div><div class="summarynums" id="counts"></div>
