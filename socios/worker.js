@@ -62,7 +62,17 @@ export default {
   const url=new URL(request.url);
   if(origin&&!ALLOWED_ORIGINS.has(origin))return respond({error:"Origem não permitida."},403,origin);
   if(request.method==="OPTIONS")return new Response(null,{status:204,headers:headers(origin)});
-  if(url.pathname==="/api/health")return respond({ok:true,service:"auvriun-socios",database_configured:!!env.DB},200,origin);
+  if(url.pathname==="/api/health"){
+   let database_configured=false;
+   let keys_configured=!!(env.ADMIN_KEY&&env.SOCIO_1_KEY&&env.SOCIO_2_KEY&&env.SOCIO_3_KEY);
+   if(env.DB){
+    try{
+     const rows=(await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('societary_answers','societary_audit','societary_decisions','societary_decision_history')").all()).results||[];
+     database_configured=rows.length===4;
+    }catch{database_configured=false}
+   }
+   return respond({ok:database_configured&&keys_configured,service:"auvriun-socios",database_configured,access_configured:keys_configured},database_configured&&keys_configured?200:503,origin);
+  }
   if(!env.DB)return respond({error:"Banco D1 ainda não configurado."},503,origin);
   try{
    const actor=await identify(request,env);
