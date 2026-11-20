@@ -51,7 +51,7 @@
    const remote=output.response;
    data.slot=id;data.code=code;data.name=name;data.answers=remote?.answers||{};
    data.completed=!!remote?.completed;data.revision=remote?.revision||0;data.section=0;
-   el("partnerName").value=data.name;
+
    el("welcome").classList.add("hidden");el("surveyView").classList.remove("hidden");
    renderSurvey();setMsg("welcomeMsg","");
   }catch(e){setMsg("welcomeMsg",e.message,true)}finally{el("start").disabled=false}
@@ -229,7 +229,7 @@
   downloadBlob("\ufeff"+rows.map(row=>row.map(csvEscape).join(";")).join("\r\n"),"AUVRIUN_conciliacao_"+new Date().toISOString().slice(0,10)+".csv","text/csv;charset=utf-8");
  }
  el("tabResponse").addEventListener("click",()=>showTab("response"));el("tabCompare").addEventListener("click",()=>showTab("compare"));
- el("partner").addEventListener("change",()=>{el("partnerName").value=PARTNERS[Number(el("partner").value)]||""});
+
  el("start").addEventListener("click",enter);el("save").addEventListener("click",saveManually);el("finish").addEventListener("click",finalize);
  el("prev").addEventListener("click",()=>{if(data.section>0){data.section--;renderSurvey();window.scrollTo({top:220,behavior:"smooth"})}});
  el("next").addEventListener("click",()=>{if(data.section<survey.sections.length-1){data.section++;renderSurvey();window.scrollTo({top:220,behavior:"smooth"})}});
