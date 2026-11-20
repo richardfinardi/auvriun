@@ -27,34 +27,33 @@ main{padding:32px 0 80px}.eyebrow{font-size:11px;color:#8fbcff;font-weight:750;l
 <div class="tabs noprint"><button class="tab active" id="tabResponse">Responder questionário</button><button class="tab" id="tabCompare">Conciliação das respostas</button></div>
 <section id="responsePane">
 <div id="welcome" class="panel stack">
-<h2>Identifique sua participação</h2><p class="muted">Cada sócio responde no seu próprio ritmo. O questionário tem 16 temas e permite salvar rascunhos. Responder não representa assinatura nem aceitação de obrigações.</p>
-<div id="modeNotice" class="info"></div>
+<h2>Identifique sua participação</h2><p class="muted">Cada sócio responde no seu próprio ritmo. O questionário tem 16 temas, salva as respostas automaticamente no banco central e permite continuar mais tarde. Responder não representa assinatura nem aceitação de obrigações.</p>
+<div id="modeNotice" class="info">Verificando o armazenamento central...</div>
 <div class="grid"><div class="field"><label for="partner">Seu identificador</label><select id="partner"><option value="">Selecione</option><option value="1">Adivelto</option><option value="2">Julio</option><option value="3">Richard</option></select></div>
 <div class="field"><label for="partnerName">Nome do sócio</label><input id="partnerName" type="text" readonly placeholder="Selecione o sócio ao lado"></div></div>
-<div id="onlineAuth" class="field hidden"><label for="partnerCode">Código individual de acesso</label><input id="partnerCode" type="password" autocomplete="off" placeholder="Código fornecido individualmente"></div>
-<div class="row"><button id="start" class="btn">Iniciar ou continuar</button></div><div id="welcomeMsg" class="statusline" role="status"></div>
+<div id="onlineAuth" class="field"><label for="partnerCode">Código individual de acesso</label><input id="partnerCode" type="password" autocomplete="off" placeholder="Código fornecido individualmente"></div>
+<div class="row"><button id="start" class="btn" disabled>Iniciar ou continuar</button></div><div id="welcomeMsg" class="statusline" role="status"></div>
 </div>
 <div id="surveyView" class="hidden"><div class="panel"><div class="space"><div><div class="eyebrow" id="currentUser"></div><h2 id="sectionTitle"></h2></div><span id="draftTag" class="pill">Rascunho</span></div><div id="sectionDescription" class="muted"></div>
 <div class="statbar"><span id="answeredCount"></span><span id="sectionPosition"></span></div><div class="progress"><div id="progressFill"></div></div><div id="sectionNav" class="sectionnav" aria-label="Navegação por temas"></div><div id="questions"></div>
-<div class="controls space noprint"><div class="row"><button id="prev" class="btn ghost">Anterior</button><button id="next" class="btn secondary">Próximo tema</button></div><div class="row"><button id="save" class="btn secondary">Salvar rascunho</button><button id="download" class="btn ghost">Exportar resposta</button><button id="finish" class="btn">Concluir</button></div></div>
-<div class="statusline" id="saveStatus" role="status"></div><p class="footnote">A conclusão do questionário não substitui os contratos e assinaturas definitivos. Respostas “A definir em conjunto” serão tratadas como pendências.</p>
+<div class="controls space noprint"><div class="row"><button id="prev" class="btn ghost">Anterior</button><button id="next" class="btn secondary">Próximo tema</button></div><div class="row"><button id="save" class="btn secondary">Salvar agora</button><button id="finish" class="btn">Enviar respostas</button></div></div>
+<div class="statusline" id="saveStatus" role="status"></div><p class="footnote">As respostas ficam armazenadas no banco da AUVRIUN. Após clicar em “Enviar respostas”, sua participação ficará concluída. O questionário não substitui os contratos e as assinaturas definitivas.</p>
 </div><div class="row" style="margin-top:12px"><button id="back" class="btn ghost">Trocar sócio / sair</button></div></div>
 </section>
 <section id="comparePane" class="hidden">
 <div id="compareAccess" class="panel stack">
 <h2>Conciliação das três perspectivas</h2><p class="muted">A comparação separa consensos, posições de dois sócios, divergências e temas pendentes. Em cada assunto, o administrador poderá registrar uma proposta de decisão e o consenso confirmado em reunião. Dois votos iguais não significam aprovação automática.</p>
 <div id="compareMode" class="info"></div>
-<div id="adminAuth" class="hidden stack"><div class="field"><label for="adminCode">Código de administração</label><input type="password" id="adminCode" autocomplete="off" placeholder="Código do administrador"></div><div class="row"><button class="btn" id="loadOnline">Carregar respostas protegidas</button></div><div id="adminActions" class="row hidden"><select id="reopenPartner" aria-label="Sócio que deseja reabrir" style="max-width:190px"><option value="1">Reabrir Adivelto</option><option value="2">Reabrir Julio</option><option value="3">Reabrir Richard</option></select><button id="reopen" class="btn ghost" type="button">Reabrir resposta concluída</button></div></div>
-<div id="importArea" class="stack"><label class="field"><span>Importar os arquivos JSON dos três sócios</span><input id="files" class="fileinput" type="file" accept=".json,application/json" multiple></label><p class="guide">Os arquivos são analisados no seu navegador, sem publicá-los no GitHub. Cada sócio deve enviar sua exportação ao responsável pela conciliação. Não são assinaturas eletrônicas.</p></div>
+<div id="adminAuth" class="stack"><div class="field"><label for="adminCode">Código de administração</label><input type="password" id="adminCode" autocomplete="off" placeholder="Código do administrador"></div><div class="row"><button class="btn" id="loadOnline">Carregar respostas protegidas</button></div><div id="adminActions" class="row hidden"><select id="reopenPartner" aria-label="Sócio que deseja reabrir" style="max-width:190px"><option value="1">Reabrir Adivelto</option><option value="2">Reabrir Julio</option><option value="3">Reabrir Richard</option></select><button id="reopen" class="btn ghost" type="button">Reabrir resposta concluída</button></div></div>
 <div class="statusline" id="compareMsg" role="status"></div>
 </div>
-<div id="report" class="hidden"><div class="panel"><div class="space"><div><div class="eyebrow">Relatório de conciliação</div><h2>Comparativo dos três sócios</h2><div id="reportDate" class="muted small"></div></div><div class="row noprint"><button id="csv" class="btn secondary">Exportar CSV</button><button id="reportJson" class="btn secondary">Acordo-base JSON</button><button id="print" class="btn ghost">Imprimir / PDF</button></div></div>
+<div id="report" class="hidden"><div class="panel"><div class="space"><div><div class="eyebrow">Relatório de conciliação</div><h2>Comparativo dos três sócios</h2><div id="reportDate" class="muted small"></div></div><div class="row noprint"><button id="csv" class="btn secondary">Planilha de conciliação</button><button id="print" class="btn ghost">Relatório em PDF</button></div></div>
 <div id="threeNames" class="guide"></div><div class="summarynums" id="counts"></div>
 <div class="grid noprint"><div class="field"><label for="filter">Filtrar situação</label><select id="filter"><option value="all">Todas as questões</option><option value="divergencia">Divergências</option><option value="maioria">Posições 2 × 1</option><option value="pendente">Pendências</option><option value="consenso">Consensos</option></select></div><div class="field"><label for="search">Buscar assunto</label><input id="search" placeholder="Palavra no tema ou na pergunta"></div></div>
 <div id="results"></div><p class="footnote">Relatório de preparação. Nenhuma conclusão substitui a negociação e aprovação formal dos sócios, a revisão jurídica ou assinaturas.</p>
 </div></div>
 </section>
-<div class="footer">© AUVRIUN • Planejamento societário • Acesso individual recomendado • Dados protegidos somente após ativação do servidor</div>
+<div class="footer">© AUVRIUN • Planejamento societário • Respostas individuais • Gravação central protegida</div>
 </main>
 <script src="config.js"></script><script src="perguntas.js"></script><script src="app.js"></script>
 </body></html>
