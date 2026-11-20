@@ -111,6 +111,22 @@ export default {
     const rows=(await env.DB.prepare("SELECT * FROM societary_answers ORDER BY partner_id").all()).results||[];
     return respond({responses:rows.map(parseResponse)},200,origin);
    }
+   if(url.pathname==="/api/decisions"&&request.method==="GET"){
+    if(actor.role!=="admin")return respond({error:"Decisões restritas ao administrador."},403,origin);
+    const rows=(await env.DB.prepare("SELECT question_id,decision_text,state,updated_at FROM societary_decisions ORDER BY question_id").all()).results||[];
+    return respond({decisions:rows},200,origin);
+   }
+   if(url.pathname==="/api/decision"&&request.method==="PUT"){
+    if(actor.role!=="admin")return respond({error:"Decisões restritas ao administrador."},403,origin);
+    const statuses=await statusData(env);
+    if(statuses.some(s=>!s.completed))return respond({error:"Finalize as três respostas antes de registrar a conciliação."},409,origin);
+    const body=await readBody(request);
+    const question=String(body.question_id||""),decision=String(body.decision_text||"").trim(),state=String(body.state||"pendente");
+    if(!/^[a-z][a-z0-9_]{1,70}$/.test(question)||decision.length>4000||!["pendente","proposta","confirmado"].includes(state)||((state==="proposta"||state==="confirmado")&&!decision))return respond({error:"Informações da decisão inválidas."},400,origin);
+    await env.DB.prepare("INSERT INTO societary_decisions (question_id,decision_text,state,updated_at) VALUES (?,?,?,datetime('now')) ON CONFLICT(question_id) DO UPDATE SET decision_text=excluded.decision_text,state=excluded.state,updated_at=datetime('now')").bind(question,decision,state).run();
+    await env.DB.prepare("INSERT INTO societary_decision_history (question_id,decision_text,state) VALUES (?,?,?)").bind(question,decision,state).run();
+    return respond({ok:true,question_id:question,state},200,origin);
+   }
    if(url.pathname==="/api/reopen"&&request.method==="POST"){
     if(actor.role!=="admin")return respond({error:"Operação restrita ao administrador."},403,origin);
     const body=await readBody(request);const id=Number(body.partner_id);
