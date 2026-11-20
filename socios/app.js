@@ -183,6 +183,7 @@
   el("loadOnline").disabled=true;setMsg("compareMsg","Consultando respostas...");
   try{
    const me=await request("GET","/api/me",code);if(me.role!=="admin")throw Error("Código sem permissão de administrador.");
+   data.adminKey=code;el("adminActions").classList.remove("hidden");
    const stats=await request("GET","/api/status",code);
    const done=stats.statuses.filter(x=>x.completed).length;
    if(done!==3){data.records=[null,null,null];el("report").classList.add("hidden");return setMsg("compareMsg",done+" de 3 sócios concluíram. A comparação ficará disponível quando os três finalizarem. "+stats.statuses.map(x=>"Sócio "+x.partner_id+": "+(x.completed?"concluído":"pendente")).join(" • "));}
@@ -190,6 +191,18 @@
    data.adminKey=code;const records=await request("GET","/api/decisions",code);data.decisions=Object.fromEntries(records.decisions.map(d=>[d.question_id,d]));
    setMsg("compareMsg","Três respostas concluídas. Comparativo pronto.");renderReport();
   }catch(e){setMsg("compareMsg",e.message,true)}finally{el("loadOnline").disabled=false}
+ }
+ async function reopenPartner(){
+  if(!API||!data.adminKey)return setMsg("compareMsg","Entre como administrador primeiro.",true);
+  const id=Number(el("reopenPartner").value);
+  if(!confirm("Reabrir a resposta do Sócio "+id+"? A conciliação ficará suspensa até que os três estejam concluídos novamente."))return;
+  el("reopen").disabled=true;
+  try{
+   await request("POST","/api/reopen",data.adminKey,{partner_id:id});
+   data.records=[null,null,null];el("report").classList.add("hidden");
+   setMsg("compareMsg","Resposta do Sócio "+id+" reaberta com sucesso. Peça a ele para entrar novamente no questionário.");
+  }catch(e){setMsg("compareMsg","Não foi possível reabrir: "+e.message,true)}
+  finally{el("reopen").disabled=false}
  }
  async function importFiles(files){
   let good=0,errors=[];
@@ -226,6 +239,7 @@
  el("prev").addEventListener("click",()=>{if(data.section>0){data.section--;renderSurvey();window.scrollTo({top:220,behavior:"smooth"})}});
  el("next").addEventListener("click",()=>{if(data.section<survey.sections.length-1){data.section++;renderSurvey();window.scrollTo({top:220,behavior:"smooth"})}});
  el("back").addEventListener("click",back);
+ el("reopen").addEventListener("click",reopenPartner);
  el("loadOnline").addEventListener("click",compareOnline);el("files").addEventListener("change",e=>importFiles([...e.target.files]));
  el("filter").addEventListener("change",renderReport);el("search").addEventListener("input",renderReport);
  el("csv").addEventListener("click",exportCsv);el("reportJson").addEventListener("click",exportJsonReport);el("print").addEventListener("click",()=>window.print());
