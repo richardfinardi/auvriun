@@ -5,7 +5,7 @@
  const el=id=>document.getElementById(id);
  const norm=s=>String(s||"").trim().replace(/\s+/g," ").toLocaleLowerCase("pt-BR");
  const safe=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
- const data={slot:0,name:"",answers:{},completed:false,revision:0,section:0,code:"",records:[null,null,null],filtered:[],remoteBusy:false};
+ const data={slot:0,name:"",answers:{},completed:false,revision:0,section:0,code:"",records:[null,null,null],filtered:[],remoteBusy:false,adminKey:"",decisions:{}};
  let saveTimer, saveQueue=Promise.resolve(), lastError="";
  const setMsg=(id,s,error=false)=>{el(id).textContent=s;el(id).classList.toggle("error",!!error)};
  function localKey(id){return "auvriun-socios-v1-"+id}
@@ -124,6 +124,7 @@
   const names=[["consenso","Consensos"],["maioria","Posições 2 × 1"],["divergencia","Divergências"],["pendente","Pendências"]];
   el("counts").innerHTML=names.map(([key,label])=>'<div><strong>'+groups[key]+'</strong><span>'+label+'</span></div>').join("");
   const results=el("results");results.replaceChildren();
+  const canConsolidate=records.every(r=>r&&r.completed);
   survey.sections.forEach((section,sidx)=>{
    let printedHeading=false;
    section.questions.forEach(q=>{
@@ -143,10 +144,38 @@
      if(val.comment){const c=document.createElement("div");c.className="comment";c.textContent=val.comment;cell.append(c)}
      cols.append(cell);
     });
-    div.append(cols);results.append(div);
+    div.append(cols);
+    if(canConsolidate){
+      const saved=data.decisions[q.id]||{decision_text:"",state:"pendente"};
+      const editor=document.createElement("div");editor.className="stack";editor.style.marginTop="14px";
+      const caption=document.createElement("label");caption.className="small";caption.style.fontWeight="800";caption.textContent="Decisão conciliada (registrada em reunião)";
+      const textarea=document.createElement("textarea");textarea.rows=2;textarea.maxLength=4000;textarea.value=saved.decision_text||"";textarea.placeholder="Qual foi o texto negociado pelos três sócios?";
+      const foot=document.createElement("div");foot.className="row";
+      const selector=document.createElement("select");selector.style.maxWidth="300px";
+      [["pendente","Ainda não negociado"],["proposta","Proposta para discussão"],["confirmado","Consenso confirmado em reunião"]].forEach(([value,label])=>{const opt=document.createElement("option");opt.value=value;opt.textContent=label;selector.append(opt)});
+      selector.value=saved.state||"pendente";
+      const save=document.createElement("button");save.type="button";save.className="btn secondary noprint";save.textContent="Salvar decisão";
+      save.onclick=async()=>{save.disabled=true;try{await saveDecision(q.id,textarea.value,selector.value);save.textContent="Salvo";setTimeout(()=>{save.textContent="Salvar decisão"},1300)}catch(e){setMsg("compareMsg","Falha ao salvar decisão: "+e.message,true)}finally{save.disabled=false}};
+      foot.append(selector,save);editor.append(caption,textarea,foot);
+      const disclaimer=document.createElement("p");disclaimer.className="footnote";disclaimer.textContent="“Consenso confirmado” é registro administrativo, não assinatura dos sócios.";editor.append(disclaimer);
+      div.append(editor);
+    }
+    results.append(div);
    });
   });
   if(!results.children.length){const p=document.createElement("p");p.className="muted";p.textContent="Nenhuma pergunta encontrada com esse filtro.";results.append(p)}
+ }
+ async function saveDecision(question_id,decision_text,state){
+  const value={decision_text:decision_text.trim(),state};
+  if(state!=="pendente"&&!value.decision_text)throw Error("Escreva a decisão antes de marcar como proposta ou confirmada.");
+  if(API)await request("PUT","/api/decision",data.adminKey,{question_id,...value});
+  data.decisions[question_id]=value;
+  if(!API)localStorage.setItem("auvriun-socios-decisions-v1",JSON.stringify(data.decisions));
+  setMsg("compareMsg","Decisão salva: "+(Q.get(question_id)?.prompt||question_id));
+ }
+ function exportJsonReport(){
+  const out={format:"auvriun-conciliacao-v1",company:survey.company,generated_at:new Date().toISOString(),responses:data.records,decisions:data.decisions,questions:survey.sections};
+  downloadBlob(JSON.stringify(out,null,2),"AUVRIUN_acordo_base_"+new Date().toISOString().slice(0,10)+".json","application/json;charset=utf-8");
  }
  async function compareOnline(){
   const code=el("adminCode").value.trim();
@@ -158,6 +187,7 @@
    const done=stats.statuses.filter(x=>x.completed).length;
    if(done!==3){data.records=[null,null,null];el("report").classList.add("hidden");return setMsg("compareMsg",done+" de 3 sócios concluíram. A comparação ficará disponível quando os três finalizarem. "+stats.statuses.map(x=>"Sócio "+x.partner_id+": "+(x.completed?"concluído":"pendente")).join(" • "));}
    const out=await request("GET","/api/reconcile",code);data.records=[1,2,3].map(id=>out.responses.find(r=>r.partner_id===id)||null);
+   data.adminKey=code;const records=await request("GET","/api/decisions",code);data.decisions=Object.fromEntries(records.decisions.map(d=>[d.question_id,d]));
    setMsg("compareMsg","Três respostas concluídas. Comparativo pronto.");renderReport();
   }catch(e){setMsg("compareMsg",e.message,true)}finally{el("loadOnline").disabled=false}
  }
@@ -184,10 +214,10 @@
   return '"'+v.replace(/"/g,'""')+'"';
  }
  function exportCsv(){
-  const rows=[["Bloco","Pergunta","Situação","Sócio 1","Comentário 1","Sócio 2","Comentário 2","Sócio 3","Comentário 3"]];
+  const rows=[["Bloco","Pergunta","Situação","Sócio 1","Comentário 1","Sócio 2","Comentário 2","Sócio 3","Comentário 3","Decisão negociada","Estado da decisão"]];
   for(const section of survey.sections)for(const q of section.questions){
    const parts=data.records.map(r=>r?.answers?.[q.id]||{});
-   rows.push([section.title,q.prompt,statusFor(q,data.records),parts[0].choice||"",parts[0].comment||"",parts[1].choice||"",parts[1].comment||"",parts[2].choice||"",parts[2].comment||""]);
+   rows.push([section.title,q.prompt,statusFor(q,data.records),parts[0].choice||"",parts[0].comment||"",parts[1].choice||"",parts[1].comment||"",parts[2].choice||"",parts[2].comment||"",data.decisions[q.id]?.decision_text||"",data.decisions[q.id]?.state||"pendente"]);
   }
   downloadBlob("\ufeff"+rows.map(row=>row.map(csvEscape).join(";")).join("\r\n"),"AUVRIUN_conciliacao_"+new Date().toISOString().slice(0,10)+".csv","text/csv;charset=utf-8");
  }
@@ -198,6 +228,7 @@
  el("back").addEventListener("click",back);
  el("loadOnline").addEventListener("click",compareOnline);el("files").addEventListener("change",e=>importFiles([...e.target.files]));
  el("filter").addEventListener("change",renderReport);el("search").addEventListener("input",renderReport);
- el("csv").addEventListener("click",exportCsv);el("print").addEventListener("click",()=>window.print());
+ el("csv").addEventListener("click",exportCsv);el("reportJson").addEventListener("click",exportJsonReport);el("print").addEventListener("click",()=>window.print());
+ try{data.decisions=JSON.parse(localStorage.getItem("auvriun-socios-decisions-v1")||"{}")}catch{};
  activateMode();
 })();
