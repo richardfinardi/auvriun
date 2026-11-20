@@ -42,13 +42,13 @@ main{padding:32px 0 80px}.eyebrow{font-size:11px;color:#8fbcff;font-weight:750;l
 </section>
 <section id="comparePane" class="hidden">
 <div id="compareAccess" class="panel stack">
-<h2>Conciliação das três perspectivas</h2><p class="muted">A comparação separa consensos, posições de dois sócios, divergências e temas pendentes. Um acordo não fica automaticamente aprovado por maioria.</p>
+<h2>Conciliação das três perspectivas</h2><p class="muted">A comparação separa consensos, posições de dois sócios, divergências e temas pendentes. Em cada assunto, o administrador poderá registrar uma proposta de decisão e o consenso confirmado em reunião. Dois votos iguais não significam aprovação automática.</p>
 <div id="compareMode" class="info"></div>
 <div id="adminAuth" class="hidden stack"><div class="field"><label for="adminCode">Código de administração</label><input type="password" id="adminCode" autocomplete="off" placeholder="Código do administrador"></div><div class="row"><button class="btn" id="loadOnline">Carregar respostas protegidas</button></div></div>
 <div id="importArea" class="stack"><label class="field"><span>Importar os arquivos JSON dos três sócios</span><input id="files" class="fileinput" type="file" accept=".json,application/json" multiple></label><p class="guide">Os arquivos são analisados no seu navegador, sem publicá-los no GitHub. Cada sócio deve enviar sua exportação ao responsável pela conciliação. Não são assinaturas eletrônicas.</p></div>
 <div class="statusline" id="compareMsg" role="status"></div>
 </div>
-<div id="report" class="hidden"><div class="panel"><div class="space"><div><div class="eyebrow">Relatório de conciliação</div><h2>Comparativo dos três sócios</h2><div id="reportDate" class="muted small"></div></div><div class="row noprint"><button id="csv" class="btn secondary">Exportar CSV</button><button id="print" class="btn ghost">Imprimir / PDF</button></div></div>
+<div id="report" class="hidden"><div class="panel"><div class="space"><div><div class="eyebrow">Relatório de conciliação</div><h2>Comparativo dos três sócios</h2><div id="reportDate" class="muted small"></div></div><div class="row noprint"><button id="csv" class="btn secondary">Exportar CSV</button><button id="reportJson" class="btn secondary">Acordo-base JSON</button><button id="print" class="btn ghost">Imprimir / PDF</button></div></div>
 <div id="threeNames" class="guide"></div><div class="summarynums" id="counts"></div>
 <div class="grid noprint"><div class="field"><label for="filter">Filtrar situação</label><select id="filter"><option value="all">Todas as questões</option><option value="divergencia">Divergências</option><option value="maioria">Posições 2 × 1</option><option value="pendente">Pendências</option><option value="consenso">Consensos</option></select></div><div class="field"><label for="search">Buscar assunto</label><input id="search" placeholder="Palavra no tema ou na pergunta"></div></div>
 <div id="results"></div><p class="footnote">Relatório de preparação. Nenhuma conclusão substitui a negociação e aprovação formal dos sócios, a revisão jurídica ou assinaturas.</p>
