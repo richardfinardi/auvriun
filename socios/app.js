@@ -7,8 +7,10 @@
  const norm=s=>String(s||"").trim().replace(/\s+/g," ").toLocaleLowerCase("pt-BR");
  const safe=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
  const data={slot:0,name:"",answers:{},completed:false,revision:0,section:0,code:"",records:[null,null,null],adminKey:"",decisions:{},ready:false};
- let saveTimer, saveQueue=Promise.resolve();
+ let saveTimer, saveQueue=Promise.resolve(), toastTimer, buttonTimer;
  const setMsg=(id,s,error=false)=>{el(id).textContent=s;el(id).classList.toggle("error",!!error)};
+ function feedback(message,type=""){const e=el("saveFeedback");if(e){e.textContent=message;e.className="save-feedback "+type;}}
+ function toast(message,error=false){const e=el("saveToast");if(!e)return;clearTimeout(toastTimer);e.textContent=message;e.className="save-toast "+(error?"error ":"")+"visible";toastTimer=setTimeout(()=>e.classList.remove("visible"),3500);}
  function isAnswered(q){return !!(data.answers[q.id]&&data.answers[q.id].choice)}
  function answered(){return questions.filter(isAnswered).length}
  function currentSectionComplete(i){return survey.sections[i].questions.every(isAnswered)}
@@ -53,7 +55,7 @@
    data.completed=!!remote?.completed;data.revision=remote?.revision||0;data.section=0;
 
    el("welcome").classList.add("hidden");el("surveyView").classList.remove("hidden");
-   renderSurvey();setMsg("welcomeMsg","");
+   renderSurvey();feedback(data.completed?"Respostas já enviadas.":data.revision?"Rascunho recuperado do banco central.":"As respostas são salvas automaticamente.");setMsg("welcomeMsg","");
   }catch(e){setMsg("welcomeMsg",e.message,true)}finally{el("start").disabled=false}
  }
  function renderSurvey(){
@@ -91,29 +93,42 @@
   
  }
  function renderSurveyPreservingFocus(qid){const item=el("questions").querySelector('[name="q_'+qid+'"]:checked');const y=item?.getBoundingClientRect().top;renderSurvey();if(y!==undefined){const next=el("questions").querySelector('[name="q_'+qid+'"]:checked');if(next)window.scrollBy(0,next.getBoundingClientRect().top-y)}}
- function changed(){setMsg("saveStatus","Salvando alterações no banco central...");if(!data.completed){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveQueue=saveQueue.then(()=>saveRemote(false)).catch(()=>{})},1100)}updateProgressWithoutRebuild();}
+ function changed(){setMsg("saveStatus","Salvando alterações no banco central...");feedback("Alterações pendentes, salvando...");if(!data.completed){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveQueue=saveQueue.then(()=>saveRemote(false)).catch(()=>{})},1100)}updateProgressWithoutRebuild();}
  function updateProgressWithoutRebuild(){const done=answered();el("answeredCount").textContent=done+" de "+questions.length+" perguntas respondidas";el("progressFill").style.width=100*done/questions.length+"%";el("finish").disabled=data.completed||done!==questions.length;el("finish").textContent=data.completed?"Enviado":"Enviar respostas ("+done+"/"+questions.length+")";}
  async function saveRemote(finalize){
   if(!data.ready)return false;
   const snapshot=JSON.stringify(data.answers),name=data.name;
   try{
-   setMsg("saveStatus",finalize?"Finalizando resposta...":"Sincronizando...");
+   setMsg("saveStatus",finalize?"Finalizando resposta...":"Sincronizando...");feedback(finalize?"Enviando respostas...":"Salvando no banco central...");
    const result=await request("PUT","/api/response",data.code,{name,answers:JSON.parse(snapshot),revision:data.revision,finalize:!!finalize});
    data.revision=result.response.revision;data.completed=!!result.response.completed;
-   setMsg("saveStatus",data.completed?"Respostas enviadas e registradas no banco central.":"Salvo no banco central às "+new Date().toLocaleTimeString("pt-BR")+".");
+   setMsg("saveStatus",data.completed?"Respostas enviadas e registradas no banco central.":"Salvo no banco central às "+new Date().toLocaleTimeString("pt-BR")+".");feedback(data.completed?"✓ Respostas enviadas.":"✓ Salvo no banco central às "+new Date().toLocaleTimeString("pt-BR"),"success");
    if(snapshot!==JSON.stringify(data.answers)&&!data.completed){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveQueue=saveQueue.then(()=>saveRemote(false)).catch(()=>{})},1000)}
    return true;
-  }catch(e){setMsg("saveStatus","Não foi possível salvar no servidor: "+e.message,true);return false}
+  }catch(e){setMsg("saveStatus","Não foi possível salvar no servidor: "+e.message,true);feedback("Erro ao salvar: "+e.message,"error");return false}
  }
- async function saveManually(){clearTimeout(saveTimer);await saveQueue;await saveRemote(false);}
+ async function saveManually(){
+  if(data.completed)return;
+  clearTimeout(saveTimer);clearTimeout(buttonTimer);
+  const button=el("save");
+  button.disabled=true;button.classList.remove("saved");button.textContent="Salvando...";
+  feedback("Salvando suas respostas...");
+  try{
+   await saveQueue;
+   const ok=await saveRemote(false);
+   if(ok){button.textContent="✓ Salvo!";button.classList.add("saved");toast("✓ Respostas salvas com sucesso!");}
+   else{button.textContent="Tentar salvar";toast("Não foi possível salvar. Tente novamente.",true);}
+  }catch(e){feedback("Erro ao salvar: "+e.message,"error");button.textContent="Tentar salvar";toast("Não foi possível salvar. Tente novamente.",true);}
+  finally{button.disabled=false;buttonTimer=setTimeout(()=>{button.textContent="Salvar agora";button.classList.remove("saved");},3000);}
+ }
  async function finalize(){
   const pending=questions.filter(q=>!isAnswered(q));
   if(pending.length){data.section=survey.sections.findIndex(s=>s.questions.some(q=>pending.includes(q)));renderSurvey();return setMsg("saveStatus","Responda todas as perguntas, escolhendo “A definir em conjunto” quando necessário.",true)}
   if(!confirm("Enviar suas respostas à AUVRIUN? Depois do envio, ficarão bloqueadas até reabertura pelo administrador."))return;
   clearTimeout(saveTimer);
   await saveQueue;
-  if(!await saveRemote(true))return;
-  renderSurvey();
+  if(!await saveRemote(true)){toast("Erro ao enviar as respostas.",true);return;}
+  renderSurvey();toast("✓ Respostas enviadas com sucesso!");
  }
  function downloadBlob(content,filename,mime){const a=document.createElement("a"),blob=new Blob([content],{type:mime});a.href=URL.createObjectURL(blob);a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);}
  async function back(){
