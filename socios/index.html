@@ -29,8 +29,8 @@ main{padding:32px 0 80px}.eyebrow{font-size:11px;color:#8fbcff;font-weight:750;l
 <div id="welcome" class="panel stack">
 <h2>Identifique sua participação</h2><p class="muted">Cada sócio responde no seu próprio ritmo. O questionário tem 16 temas e permite salvar rascunhos. Responder não representa assinatura nem aceitação de obrigações.</p>
 <div id="modeNotice" class="info"></div>
-<div class="grid"><div class="field"><label for="partner">Seu identificador</label><select id="partner"><option value="">Selecione</option><option value="1">Sócio 1</option><option value="2">Sócio 2</option><option value="3">Sócio 3</option></select></div>
-<div class="field"><label for="partnerName">Seu nome</label><input id="partnerName" type="text" maxlength="100" autocomplete="name" placeholder="Como deve aparecer no relatório"></div></div>
+<div class="grid"><div class="field"><label for="partner">Seu identificador</label><select id="partner"><option value="">Selecione</option><option value="1">Adivelto</option><option value="2">Julio</option><option value="3">Richard</option></select></div>
+<div class="field"><label for="partnerName">Nome do sócio</label><input id="partnerName" type="text" readonly placeholder="Selecione o sócio ao lado"></div></div>
 <div id="onlineAuth" class="field hidden"><label for="partnerCode">Código individual de acesso</label><input id="partnerCode" type="password" autocomplete="off" placeholder="Código fornecido individualmente"></div>
 <div class="row"><button id="start" class="btn">Iniciar ou continuar</button></div><div id="welcomeMsg" class="statusline" role="status"></div>
 </div>
@@ -44,7 +44,7 @@ main{padding:32px 0 80px}.eyebrow{font-size:11px;color:#8fbcff;font-weight:750;l
 <div id="compareAccess" class="panel stack">
 <h2>Conciliação das três perspectivas</h2><p class="muted">A comparação separa consensos, posições de dois sócios, divergências e temas pendentes. Em cada assunto, o administrador poderá registrar uma proposta de decisão e o consenso confirmado em reunião. Dois votos iguais não significam aprovação automática.</p>
 <div id="compareMode" class="info"></div>
-<div id="adminAuth" class="hidden stack"><div class="field"><label for="adminCode">Código de administração</label><input type="password" id="adminCode" autocomplete="off" placeholder="Código do administrador"></div><div class="row"><button class="btn" id="loadOnline">Carregar respostas protegidas</button></div><div id="adminActions" class="row hidden"><select id="reopenPartner" aria-label="Sócio que deseja reabrir" style="max-width:190px"><option value="1">Reabrir Sócio 1</option><option value="2">Reabrir Sócio 2</option><option value="3">Reabrir Sócio 3</option></select><button id="reopen" class="btn ghost" type="button">Reabrir resposta concluída</button></div></div>
+<div id="adminAuth" class="hidden stack"><div class="field"><label for="adminCode">Código de administração</label><input type="password" id="adminCode" autocomplete="off" placeholder="Código do administrador"></div><div class="row"><button class="btn" id="loadOnline">Carregar respostas protegidas</button></div><div id="adminActions" class="row hidden"><select id="reopenPartner" aria-label="Sócio que deseja reabrir" style="max-width:190px"><option value="1">Reabrir Adivelto</option><option value="2">Reabrir Julio</option><option value="3">Reabrir Richard</option></select><button id="reopen" class="btn ghost" type="button">Reabrir resposta concluída</button></div></div>
 <div id="importArea" class="stack"><label class="field"><span>Importar os arquivos JSON dos três sócios</span><input id="files" class="fileinput" type="file" accept=".json,application/json" multiple></label><p class="guide">Os arquivos são analisados no seu navegador, sem publicá-los no GitHub. Cada sócio deve enviar sua exportação ao responsável pela conciliação. Não são assinaturas eletrônicas.</p></div>
 <div class="statusline" id="compareMsg" role="status"></div>
 </div>
