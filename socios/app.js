@@ -82,42 +82,46 @@
     label.append(inp,span);choices.append(label);
    });
    const note=document.createElement("div");note.className="note field";const noteLabel=document.createElement("span");noteLabel.textContent="Comentários e proposta específica (opcional)";const area=document.createElement("textarea");area.rows=2;area.maxLength=2000;area.placeholder="Explique sua visão, valores, percentuais, prazos ou exceções...";area.value=val.comment||"";area.disabled=data.completed;
-   area.addEventListener("input",()=>{data.answers[q.id]={...(data.answers[q.id]||{}),comment:area.value};changed(false)});
+   area.addEventListener("input",()=>{data.answers[q.id]={...(data.answers[q.id]||{}),comment:area.value};changed()});
    note.append(noteLabel,area);card.append(choices,note);box.append(card);
   });
   el("prev").disabled=data.section===0;el("next").disabled=data.section===survey.sections.length-1;
   el("save").disabled=data.completed;el("finish").disabled=data.completed || !all;
-  el("finish").textContent=data.completed?"Resposta concluída":"Concluir "+(all?"("+questions.length+"/"+questions.length+")":"("+done+"/"+questions.length+")");
-  el("download").textContent="Exportar resposta";
+  el("finish").textContent=data.completed?"Enviado":"Enviar respostas ("+done+"/"+questions.length+")";
+  
  }
  function renderSurveyPreservingFocus(qid){const item=el("questions").querySelector('[name="q_'+qid+'"]:checked');const y=item?.getBoundingClientRect().top;renderSurvey();if(y!==undefined){const next=el("questions").querySelector('[name="q_'+qid+'"]:checked');if(next)window.scrollBy(0,next.getBoundingClientRect().top-y)}}
- function changed(schedule=true){keepLocal();setMsg("saveStatus",API?"Alterações locais pendentes de sincronização.":"Rascunho salvo neste navegador.");if(schedule&&API&&!data.completed){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveQueue=saveQueue.then(()=>saveRemote(false)).catch(()=>{})},1050)}updateProgressWithoutRebuild();}
- function updateProgressWithoutRebuild(){const done=answered();el("answeredCount").textContent=done+" de "+questions.length+" perguntas respondidas";el("progressFill").style.width=100*done/questions.length+"%";el("finish").disabled=data.completed||done!==questions.length;el("finish").textContent=data.completed?"Resposta concluída":"Concluir ("+done+"/"+questions.length+")";}
+ function changed(){setMsg("saveStatus","Salvando alterações no banco central...");if(!data.completed){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveQueue=saveQueue.then(()=>saveRemote(false)).catch(()=>{})},1100)}updateProgressWithoutRebuild();}
+ function updateProgressWithoutRebuild(){const done=answered();el("answeredCount").textContent=done+" de "+questions.length+" perguntas respondidas";el("progressFill").style.width=100*done/questions.length+"%";el("finish").disabled=data.completed||done!==questions.length;el("finish").textContent=data.completed?"Enviado":"Enviar respostas ("+done+"/"+questions.length+")";}
  async function saveRemote(finalize){
-  if(!API)return true;
+  if(!data.ready)return false;
   const snapshot=JSON.stringify(data.answers),name=data.name;
   try{
    setMsg("saveStatus",finalize?"Finalizando resposta...":"Sincronizando...");
    const result=await request("PUT","/api/response",data.code,{name,answers:JSON.parse(snapshot),revision:data.revision,finalize:!!finalize});
    data.revision=result.response.revision;data.completed=!!result.response.completed;
-   keepLocal();setMsg("saveStatus",data.completed?"Resposta concluída e salva no servidor.":"Salvo no servidor às "+new Date().toLocaleTimeString("pt-BR")+".");
+   setMsg("saveStatus",data.completed?"Respostas enviadas e registradas no banco central.":"Salvo no banco central às "+new Date().toLocaleTimeString("pt-BR")+".");
    if(snapshot!==JSON.stringify(data.answers)&&!data.completed){clearTimeout(saveTimer);saveTimer=setTimeout(()=>{saveQueue=saveQueue.then(()=>saveRemote(false)).catch(()=>{})},1000)}
    return true;
   }catch(e){setMsg("saveStatus","Não foi possível salvar no servidor: "+e.message,true);return false}
  }
- async function saveManually(){keepLocal();clearTimeout(saveTimer);if(API){await saveQueue;await saveRemote(false)}else setMsg("saveStatus","Rascunho salvo neste navegador. Exporte o JSON para compartilhar.");}
+ async function saveManually(){clearTimeout(saveTimer);await saveQueue;await saveRemote(false);}
  async function finalize(){
   const pending=questions.filter(q=>!isAnswered(q));
-  if(pending.length){data.section=survey.sections.findIndex(s=>s.questions.some(q=>pending.includes(q)));renderSurvey();return setMsg("saveStatus","Responda todas as questões, inclusive escolhendo “A definir em conjunto” quando necessário.",true)}
-  if(!confirm("Concluir sua resposta? Após concluir, ela ficará bloqueada. O administrador poderá reabri-la se necessário."))return;
+  if(pending.length){data.section=survey.sections.findIndex(s=>s.questions.some(q=>pending.includes(q)));renderSurvey();return setMsg("saveStatus","Responda todas as perguntas, escolhendo “A definir em conjunto” quando necessário.",true)}
+  if(!confirm("Enviar suas respostas à AUVRIUN? Depois do envio, ficarão bloqueadas até reabertura pelo administrador."))return;
   clearTimeout(saveTimer);
-  if(API){await saveQueue;const ok=await saveRemote(true);if(!ok)return;renderSurvey();}
-  else{data.completed=true;keepLocal();renderSurvey();downloadAnswer();setMsg("saveStatus","Concluído localmente. O arquivo JSON foi gerado: envie ao responsável pela conciliação.")}
+  await saveQueue;
+  if(!await saveRemote(true))return;
+  renderSurvey();
  }
- function filename(s){return String(s).normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9_-]+/gi,"_").slice(0,40)}
  function downloadBlob(content,filename,mime){const a=document.createElement("a"),blob=new Blob([content],{type:mime});a.href=URL.createObjectURL(blob);a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);}
- function downloadAnswer(){if(!data.slot)return;const out={format:"auvriun-acordo-v1",partner_id:data.slot,name:data.name,answers:data.answers,completed:data.completed,revision:data.revision,exported_at:new Date().toISOString()};downloadBlob(JSON.stringify(out,null,2),"AUVRIUN_socio_"+data.slot+"_"+filename(data.name)+".json","application/json;charset=utf-8")}
- function back(){clearTimeout(saveTimer);keepLocal();data.slot=0;data.code="";el("partnerCode").value="";el("welcome").classList.remove("hidden");el("surveyView").classList.add("hidden");setMsg("welcomeMsg","")}
+ async function back(){
+  clearTimeout(saveTimer);
+  if(!data.completed){await saveQueue;if(!await saveRemote(false))return;}
+  data.slot=0;data.code="";el("partnerCode").value="";
+  el("welcome").classList.remove("hidden");el("surveyView").classList.add("hidden");setMsg("welcomeMsg","");
+ }
  function statusFor(q,records){
   const picks=records.map(r=>r?.answers?.[q.id]?.choice||"");
   if(picks.some(v=>!v||v===survey.unassigned))return "pendente";
