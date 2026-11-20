@@ -4,6 +4,7 @@
  */
 const ALLOWED_ORIGINS = new Set(["https://auvriun.com","https://www.auvriun.com"]);
 const REQUIRED_ANSWERS = 61;
+const PARTNER_NAMES={1:"Adivelto",2:"Julio",3:"Richard"};
 const enc = new TextEncoder();
 
 function headers(origin){
@@ -46,11 +47,11 @@ function validAnswers(answers){
  });
 }
 function parseResponse(row){
- return row?{partner_id:row.partner_id,name:row.display_name,answers:JSON.parse(row.answers),completed:!!row.completed,revision:row.revision,updated_at:row.updated_at,completed_at:row.completed_at}:null;
+ return row?{partner_id:row.partner_id,name:PARTNER_NAMES[row.partner_id],answers:JSON.parse(row.answers),completed:!!row.completed,revision:row.revision,updated_at:row.updated_at,completed_at:row.completed_at}:null;
 }
 async function statusData(env){
  const rows=(await env.DB.prepare("SELECT partner_id,display_name,completed,updated_at FROM societary_answers ORDER BY partner_id").all()).results||[];
- return [1,2,3].map(id=>{const r=rows.find(x=>x.partner_id===id);return {partner_id:id,name:r?.display_name||"",completed:!!r?.completed,has_draft:!!r,updated_at:r?.updated_at||null}});
+ return [1,2,3].map(id=>{const r=rows.find(x=>x.partner_id===id);return {partner_id:id,name:PARTNER_NAMES[id],completed:!!r?.completed,has_draft:!!r,updated_at:r?.updated_at||null}});
 }
 async function audit(env,partner_id,action,revision){
  await env.DB.prepare("INSERT INTO societary_audit (partner_id,action,revision) VALUES (?,?,?)").bind(partner_id,action,revision).run();
@@ -76,7 +77,7 @@ export default {
    if(url.pathname==="/api/response"&&request.method==="PUT"){
     if(actor.role!=="partner")return respond({error:"Administrador não edita respostas dos sócios."},403,origin);
     const body=await readBody(request);
-    const name=String(body.name||"").trim();
+    const name=PARTNER_NAMES[actor.partner_id];
     const revision=body.revision;
     const finalize=body.finalize===true;
     if(name.length<2||name.length>100)return respond({error:"Nome inválido."},400,origin);
