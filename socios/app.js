@@ -203,20 +203,62 @@
   
   setMsg("compareMsg","Decisão salva: "+(Q.get(question_id)?.prompt||question_id));
  }
+ function formatSavedTime(value){
+  if(!value)return "Nenhum salvamento";
+  const iso=String(value).trim().replace(" ","T");
+  const date=new Date(iso+(iso.endsWith("Z")||/[+-]\d\d:\d\d$/.test(iso)?"":"Z"));
+  if(Number.isNaN(date.getTime()))return "Horário indisponível";
+  return "Último salvamento: "+new Intl.DateTimeFormat("pt-BR",{
+   timeZone:"America/Sao_Paulo",day:"2-digit",month:"2-digit",year:"numeric",
+   hour:"2-digit",minute:"2-digit"
+  }).format(date)+" (Brasília)";
+ }
+ function showPartnerProgress(statuses){
+  const overview=el("adminOverview"),grid=el("partnerProgress");
+  if(!overview||!grid)return;
+  overview.classList.remove("hidden");
+  grid.replaceChildren();
+  let sent=0;
+  for(const id of [1,2,3]){
+   const item=statuses.find(s=>Number(s.partner_id)===id)||{};
+   const total=questions.length;
+   const answerCount=Math.min(total,Math.max(0,Number(item.answered_count)||0));
+   const pct=Math.round(100*answerCount/total);
+   const completed=!!item.completed;
+   if(completed)sent++;
+   const state=completed?"Enviado":item.has_draft?"Rascunho salvo":"Não iniciado";
+   const badge=completed?"green":item.has_draft?"orange":"";
+   const card=document.createElement("article");card.className="partner-status-card";
+   const heading=document.createElement("div");heading.className="space";
+   const name=document.createElement("div");name.className="name";name.textContent=PARTNERS[id];
+   const pill=document.createElement("span");pill.className="pill "+badge;pill.textContent=state;
+   heading.append(name,pill);
+   const number=document.createElement("div");number.className="number";number.textContent=answerCount+" / "+total+" perguntas";
+   const percentage=document.createElement("div");percentage.className="muted small";percentage.textContent=pct+"% respondido";
+   const bar=document.createElement("div");bar.className="progress";bar.setAttribute("role","progressbar");
+   bar.setAttribute("aria-valuenow",String(answerCount));bar.setAttribute("aria-valuemin","0");bar.setAttribute("aria-valuemax",String(total));bar.setAttribute("aria-label","Progresso de "+PARTNERS[id]);
+   const fill=document.createElement("div");fill.style.width=pct+"%";bar.append(fill);
+   const saved=document.createElement("div");saved.className="updated";saved.textContent=formatSavedTime(item.updated_at);
+   card.append(heading,number,percentage,bar,saved);
+   grid.append(card);
+  }
+  el("progressUpdated").textContent=sent+" de 3 sócios enviaram as respostas • Atualizado às "+new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})+".";
+ }
  async function compareOnline(){
-  const code=el("adminCode").value.trim();
+  const code=el("adminCode").value.trim()||data.adminKey;
   if(!code)return setMsg("compareMsg","Informe o código de administração.",true);
-  el("loadOnline").disabled=true;setMsg("compareMsg","Consultando respostas...");
+  el("loadOnline").disabled=true;el("refreshProgress").disabled=true;setMsg("compareMsg","Consultando respostas...");
   try{
    const me=await request("GET","/api/me",code);if(me.role!=="admin")throw Error("Código sem permissão de administrador.");
    data.adminKey=code;el("adminActions").classList.remove("hidden");
    const stats=await request("GET","/api/status",code);
+   showPartnerProgress(stats.statuses);
    const done=stats.statuses.filter(x=>x.completed).length;
    if(done!==3){data.records=[null,null,null];el("report").classList.add("hidden");return setMsg("compareMsg",done+" de 3 sócios concluíram. A comparação ficará disponível quando os três finalizarem. "+stats.statuses.map(x=>PARTNERS[x.partner_id]+": "+(x.completed?"concluído":"pendente")).join(" • "));}
    const out=await request("GET","/api/reconcile",code);data.records=[1,2,3].map(id=>out.responses.find(r=>r.partner_id===id)||null);
    data.adminKey=code;const records=await request("GET","/api/decisions",code);data.decisions=Object.fromEntries(records.decisions.map(d=>[d.question_id,d]));
    setMsg("compareMsg","Três respostas concluídas. Comparativo pronto.");renderReport();
-  }catch(e){setMsg("compareMsg",e.message,true)}finally{el("loadOnline").disabled=false}
+  }catch(e){setMsg("compareMsg",e.message,true)}finally{el("loadOnline").disabled=false;el("refreshProgress").disabled=false}
  }
  async function reopenPartner(){
   if(!data.ready||!data.adminKey)return setMsg("compareMsg","Entre como administrador primeiro.",true);
@@ -226,7 +268,8 @@
   try{
    await request("POST","/api/reopen",data.adminKey,{partner_id:id});
    data.records=[null,null,null];el("report").classList.add("hidden");
-   setMsg("compareMsg","Resposta de "+PARTNERS[id]+" reaberta com sucesso. Peça a ele para entrar novamente no questionário.");
+   await compareOnline();
+   setMsg("compareMsg","Resposta de "+PARTNERS[id]+" reaberta. Peça a ele para entrar novamente no questionário.");
   }catch(e){setMsg("compareMsg","Não foi possível reabrir: "+e.message,true)}
   finally{el("reopen").disabled=false}
  }
@@ -251,6 +294,7 @@
  el("back").addEventListener("click",back);
  el("reopen").addEventListener("click",reopenPartner);
  el("loadOnline").addEventListener("click",compareOnline);
+ el("refreshProgress").addEventListener("click",compareOnline);
  el("filter").addEventListener("change",renderReport);el("search").addEventListener("input",renderReport);
  el("csv").addEventListener("click",exportCsv);el("print").addEventListener("click",()=>window.print());
  activateMode();
