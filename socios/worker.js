@@ -1,6 +1,7 @@
 /**
  * AUVRIUN · Questionário de acordo societário
  * Cloudflare Worker + D1. Não colocar códigos individuais no repositório.
+ * Endpoint de diagnóstico: GET /api/health.
  */
 const ALLOWED_ORIGINS = new Set(["https://auvriun.com","https://www.auvriun.com"]);
 const REQUIRED_ANSWERS = 61;
