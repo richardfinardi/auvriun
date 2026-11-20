@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "auvriun-socios",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-20",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "auvriun_socios",
+      "database_id": "SUBSTITUIR_PELO_ID_D1"
+    }
+  ]
+}
