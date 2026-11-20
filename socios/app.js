@@ -183,14 +183,10 @@
  async function saveDecision(question_id,decision_text,state){
   const value={decision_text:decision_text.trim(),state};
   if(state!=="pendente"&&!value.decision_text)throw Error("Escreva a decisão antes de marcar como proposta ou confirmada.");
-  if(API)await request("PUT","/api/decision",data.adminKey,{question_id,...value});
+  await request("PUT","/api/decision",data.adminKey,{question_id,...value});
   data.decisions[question_id]=value;
-  if(!API)localStorage.setItem("auvriun-socios-decisions-v1",JSON.stringify(data.decisions));
+  
   setMsg("compareMsg","Decisão salva: "+(Q.get(question_id)?.prompt||question_id));
- }
- function exportJsonReport(){
-  const out={format:"auvriun-conciliacao-v1",company:survey.company,generated_at:new Date().toISOString(),responses:data.records,decisions:data.decisions,questions:survey.sections};
-  downloadBlob(JSON.stringify(out,null,2),"AUVRIUN_acordo_base_"+new Date().toISOString().slice(0,10)+".json","application/json;charset=utf-8");
  }
  async function compareOnline(){
   const code=el("adminCode").value.trim();
@@ -201,14 +197,14 @@
    data.adminKey=code;el("adminActions").classList.remove("hidden");
    const stats=await request("GET","/api/status",code);
    const done=stats.statuses.filter(x=>x.completed).length;
-   if(done!==3){data.records=[null,null,null];el("report").classList.add("hidden");return setMsg("compareMsg",done+" de 3 sócios concluíram. A comparação ficará disponível quando os três finalizarem. "+stats.statuses.map(x=>"Sócio "+x.partner_id+": "+(x.completed?"concluído":"pendente")).join(" • "));}
+   if(done!==3){data.records=[null,null,null];el("report").classList.add("hidden");return setMsg("compareMsg",done+" de 3 sócios concluíram. A comparação ficará disponível quando os três finalizarem. "+stats.statuses.map(x=>PARTNERS[x.partner_id]+": "+(x.completed?"concluído":"pendente")).join(" • "));}
    const out=await request("GET","/api/reconcile",code);data.records=[1,2,3].map(id=>out.responses.find(r=>r.partner_id===id)||null);
    data.adminKey=code;const records=await request("GET","/api/decisions",code);data.decisions=Object.fromEntries(records.decisions.map(d=>[d.question_id,d]));
    setMsg("compareMsg","Três respostas concluídas. Comparativo pronto.");renderReport();
   }catch(e){setMsg("compareMsg",e.message,true)}finally{el("loadOnline").disabled=false}
  }
  async function reopenPartner(){
-  if(!API||!data.adminKey)return setMsg("compareMsg","Entre como administrador primeiro.",true);
+  if(!data.ready||!data.adminKey)return setMsg("compareMsg","Entre como administrador primeiro.",true);
   const id=Number(el("reopenPartner").value);
   if(!confirm("Reabrir a resposta de "+PARTNERS[id]+"? A conciliação ficará suspensa até que os três estejam concluídos novamente."))return;
   el("reopen").disabled=true;
@@ -218,23 +214,6 @@
    setMsg("compareMsg","Resposta de "+PARTNERS[id]+" reaberta com sucesso. Peça a ele para entrar novamente no questionário.");
   }catch(e){setMsg("compareMsg","Não foi possível reabrir: "+e.message,true)}
   finally{el("reopen").disabled=false}
- }
- async function importFiles(files){
-  let good=0,errors=[];
-  for(const f of files){
-   try{
-    if(f.size>150000)throw Error("arquivo muito grande");
-    const obj=JSON.parse(await f.text());
-    if(obj.format!=="auvriun-acordo-v1"||![1,2,3].includes(Number(obj.partner_id))||!obj.answers||typeof obj.answers!=="object"||Array.isArray(obj.answers))throw Error("formato inválido");
-    const answers={};
-    for(const [key,v] of Object.entries(obj.answers))if(Q.has(key)&&v&&typeof v.choice==="string"){answers[key]={choice:v.choice.slice(0,250),comment:typeof v.comment==="string"?v.comment.slice(0,2000):""}}
-    data.records[Number(obj.partner_id)-1]={partner_id:Number(obj.partner_id),name:PARTNERS[Number(obj.partner_id)],answers,completed:!!obj.completed};
-    good++;
-   }catch(e){errors.push(f.name+": "+e.message)}
-  }
-  const count=data.records.filter(Boolean).length;
-  setMsg("compareMsg",good+" arquivo(s) importado(s). "+count+"/3 sócios representados."+(errors.length?" Erros: "+errors.join(" | "):""),errors.length>0);
-  renderReport();
  }
  function csvEscape(value){
   let v=String(value??"");
@@ -251,14 +230,13 @@
  }
  el("tabResponse").addEventListener("click",()=>showTab("response"));el("tabCompare").addEventListener("click",()=>showTab("compare"));
  el("partner").addEventListener("change",()=>{el("partnerName").value=PARTNERS[Number(el("partner").value)]||""});
- el("start").addEventListener("click",enter);el("save").addEventListener("click",saveManually);el("download").addEventListener("click",downloadAnswer);el("finish").addEventListener("click",finalize);
+ el("start").addEventListener("click",enter);el("save").addEventListener("click",saveManually);el("finish").addEventListener("click",finalize);
  el("prev").addEventListener("click",()=>{if(data.section>0){data.section--;renderSurvey();window.scrollTo({top:220,behavior:"smooth"})}});
  el("next").addEventListener("click",()=>{if(data.section<survey.sections.length-1){data.section++;renderSurvey();window.scrollTo({top:220,behavior:"smooth"})}});
  el("back").addEventListener("click",back);
  el("reopen").addEventListener("click",reopenPartner);
- el("loadOnline").addEventListener("click",compareOnline);el("files").addEventListener("change",e=>importFiles([...e.target.files]));
+ el("loadOnline").addEventListener("click",compareOnline);
  el("filter").addEventListener("change",renderReport);el("search").addEventListener("input",renderReport);
- el("csv").addEventListener("click",exportCsv);el("reportJson").addEventListener("click",exportJsonReport);el("print").addEventListener("click",()=>window.print());
- try{data.decisions=JSON.parse(localStorage.getItem("auvriun-socios-decisions-v1")||"{}")}catch{};
+ el("csv").addEventListener("click",exportCsv);el("print").addEventListener("click",()=>window.print());
  activateMode();
 })();
