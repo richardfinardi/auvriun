@@ -1,5 +1,6 @@
 "use strict";
 (() => {
+ const PARTNERS={1:"Adivelto",2:"Julio",3:"Richard"};
  const survey=window.AUVRIUN_SURVEY, API=String(window.AUVRIUN_SOCIOS_API||"").replace(/\/+$/,"");
  const questions=survey.sections.flatMap(s=>s.questions), Q=new Map(questions.map(q=>[q.id,q]));
  const el=id=>document.getElementById(id);
@@ -28,8 +29,8 @@
   return output;
  }
  async function enter(){
-  const id=Number(el("partner").value),name=el("partnerName").value.trim(),code=el("partnerCode").value.trim();
-  if(![1,2,3].includes(id))return setMsg("welcomeMsg","Escolha Sócio 1, 2 ou 3.",true);
+  const id=Number(el("partner").value),name=PARTNERS[id]||"",code=el("partnerCode").value.trim();
+  if(![1,2,3].includes(id))return setMsg("welcomeMsg","Selecione Adivelto, Julio ou Richard.",true);
   if(name.length<2)return setMsg("welcomeMsg","Informe seu nome.",true);
   if(API&&!code)return setMsg("welcomeMsg","Informe seu código de acesso.",true);
   el("start").disabled=true;setMsg("welcomeMsg","Abrindo resposta...");
@@ -37,7 +38,7 @@
    let remote=null;
    if(API){const me=await request("GET","/api/me",code);if(me.role!=="partner"||me.partner_id!==id)throw Error("O código informado não pertence ao sócio selecionado.");const output=await request("GET","/api/response",code);remote=output.response;}
    const draft=getLocal(id);
-   data.slot=id;data.code=code;data.name=remote?.name || draft?.name || name;data.answers=remote?.answers||draft?.answers||{};
+   data.slot=id;data.code=code;data.name=name;data.answers=remote?.answers||draft?.answers||{};
    data.completed=!!(remote?.completed ?? draft?.completed);data.revision=remote?.revision||0;data.section=0;
    if(!remote && !draft)data.name=name;
    el("partnerName").value=data.name;
@@ -47,7 +48,7 @@
  }
  function renderSurvey(){
   const s=survey.sections[data.section],done=answered(),all=done===questions.length;
-  el("currentUser").textContent="Sócio "+data.slot+" • "+data.name;
+  el("currentUser").textContent=data.name;
   el("sectionTitle").textContent=(data.section+1)+". "+s.title;
   el("sectionDescription").textContent=s.description;
   el("sectionPosition").textContent="Tema "+(data.section+1)+" de "+survey.sections.length;
@@ -118,7 +119,7 @@
   if(!records.some(Boolean)){el("report").classList.add("hidden");return}
   el("report").classList.remove("hidden");
   el("reportDate").textContent="Gerado em "+new Date().toLocaleString("pt-BR");
-  el("threeNames").textContent=[1,2,3].map(id=>"Sócio "+id+": "+(records[id-1]?.name||"Aguardando resposta")+(records[id-1]&&!records[id-1].completed?" (rascunho)":"")).join(" • ");
+  el("threeNames").textContent=[1,2,3].map(id=>PARTNERS[id]+": "+(records[id-1]?"resposta recebida":"Aguardando resposta")+(records[id-1]&&!records[id-1].completed?" (rascunho)":"")).join(" • ");
   const groups={consenso:0,maioria:0,divergencia:0,pendente:0},filter=el("filter").value,term=norm(el("search").value);
   for(const q of questions)groups[statusFor(q,records)]++;
   const names=[["consenso","Consensos"],["maioria","Posições 2 × 1"],["divergencia","Divergências"],["pendente","Pendências"]];
@@ -138,7 +139,7 @@
     const cols=document.createElement("div");cols.className="comparecols";
     records.forEach((record,i)=>{
      const val=record?.answers?.[q.id]||{},cell=document.createElement("div");cell.className="comparecol";
-     const who=document.createElement("div");who.className="who";who.textContent="SÓCIO "+(i+1)+(record?.name?" · "+record.name:"");
+     const who=document.createElement("div");who.className="who";who.textContent=PARTNERS[i+1];
      const answer=document.createElement("div");answer.className="answer";answer.textContent=val.choice||"Sem resposta";if(!val.choice)answer.classList.add("missing");
      cell.append(who,answer);
      if(val.comment){const c=document.createElement("div");c.className="comment";c.textContent=val.comment;cell.append(c)}
@@ -195,12 +196,12 @@
  async function reopenPartner(){
   if(!API||!data.adminKey)return setMsg("compareMsg","Entre como administrador primeiro.",true);
   const id=Number(el("reopenPartner").value);
-  if(!confirm("Reabrir a resposta do Sócio "+id+"? A conciliação ficará suspensa até que os três estejam concluídos novamente."))return;
+  if(!confirm("Reabrir a resposta de "+PARTNERS[id]+"? A conciliação ficará suspensa até que os três estejam concluídos novamente."))return;
   el("reopen").disabled=true;
   try{
    await request("POST","/api/reopen",data.adminKey,{partner_id:id});
    data.records=[null,null,null];el("report").classList.add("hidden");
-   setMsg("compareMsg","Resposta do Sócio "+id+" reaberta com sucesso. Peça a ele para entrar novamente no questionário.");
+   setMsg("compareMsg","Resposta de "+PARTNERS[id]+" reaberta com sucesso. Peça a ele para entrar novamente no questionário.");
   }catch(e){setMsg("compareMsg","Não foi possível reabrir: "+e.message,true)}
   finally{el("reopen").disabled=false}
  }
@@ -213,7 +214,7 @@
     if(obj.format!=="auvriun-acordo-v1"||![1,2,3].includes(Number(obj.partner_id))||!obj.answers||typeof obj.answers!=="object"||Array.isArray(obj.answers))throw Error("formato inválido");
     const answers={};
     for(const [key,v] of Object.entries(obj.answers))if(Q.has(key)&&v&&typeof v.choice==="string"){answers[key]={choice:v.choice.slice(0,250),comment:typeof v.comment==="string"?v.comment.slice(0,2000):""}}
-    data.records[Number(obj.partner_id)-1]={partner_id:Number(obj.partner_id),name:String(obj.name||"").slice(0,100),answers,completed:!!obj.completed};
+    data.records[Number(obj.partner_id)-1]={partner_id:Number(obj.partner_id),name:PARTNERS[Number(obj.partner_id)],answers,completed:!!obj.completed};
     good++;
    }catch(e){errors.push(f.name+": "+e.message)}
   }
@@ -227,7 +228,7 @@
   return '"'+v.replace(/"/g,'""')+'"';
  }
  function exportCsv(){
-  const rows=[["Bloco","Pergunta","Situação","Sócio 1","Comentário 1","Sócio 2","Comentário 2","Sócio 3","Comentário 3","Decisão negociada","Estado da decisão"]];
+  const rows=[["Bloco","Pergunta","Situação","Adivelto","Comentário Adivelto","Julio","Comentário Julio","Richard","Comentário Richard","Decisão negociada","Estado da decisão"]];
   for(const section of survey.sections)for(const q of section.questions){
    const parts=data.records.map(r=>r?.answers?.[q.id]||{});
    rows.push([section.title,q.prompt,statusFor(q,data.records),parts[0].choice||"",parts[0].comment||"",parts[1].choice||"",parts[1].comment||"",parts[2].choice||"",parts[2].comment||"",data.decisions[q.id]?.decision_text||"",data.decisions[q.id]?.state||"pendente"]);
@@ -235,6 +236,7 @@
   downloadBlob("\ufeff"+rows.map(row=>row.map(csvEscape).join(";")).join("\r\n"),"AUVRIUN_conciliacao_"+new Date().toISOString().slice(0,10)+".csv","text/csv;charset=utf-8");
  }
  el("tabResponse").addEventListener("click",()=>showTab("response"));el("tabCompare").addEventListener("click",()=>showTab("compare"));
+ el("partner").addEventListener("change",()=>{el("partnerName").value=PARTNERS[Number(el("partner").value)]||""});
  el("start").addEventListener("click",enter);el("save").addEventListener("click",saveManually);el("download").addEventListener("click",downloadAnswer);el("finish").addEventListener("click",finalize);
  el("prev").addEventListener("click",()=>{if(data.section>0){data.section--;renderSurvey();window.scrollTo({top:220,behavior:"smooth"})}});
  el("next").addEventListener("click",()=>{if(data.section<survey.sections.length-1){data.section++;renderSurvey();window.scrollTo({top:220,behavior:"smooth"})}});
